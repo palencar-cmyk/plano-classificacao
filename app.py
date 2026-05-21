@@ -59,31 +59,25 @@ def validar_codigo(codigo, tipo):
 class PDF(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 14)
-        self.cell(0, 10, 'Plano de Classificação de Documentos', 0, 1, 'C')
+        self.cell(0, 10, 'Plano de Classificacao de Documentos', 0, 1, 'C')
         self.ln(5)
     def footer(self):
         self.set_y(-15)
         self.set_font('Arial', 'I', 8)
-        self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
+        self.cell(0, 10, f'Pagina {self.page_no()}', 0, 0, 'C')
 
 def gerar_pdf(orgao, itens):
     pdf = PDF()
     pdf.add_page()
     pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 10, f"Órgão: {orgao}", 0, 1, 'L')
+    pdf.cell(0, 10, f"Orgao: {orgao}", 0, 1, 'L')
     pdf.ln(5)
     pdf.set_font("Arial", '', 11)
     
-    # Ordenar elementos pelo código numericamente para garantir a hierarquia visual no PDF
     itens_ordenados = sorted(itens, key=lambda x: x[0])
     
     for cod, tipo, txt in itens_ordenados:
-        indent = ""
-        if tipo == "Subfunção": indent = ""
-        elif tipo == "Atividade": indent = ""
-        elif tipo == "Tipo documental": indent = ""        "
-        
-        texto_linha = f"{indent}{cod} {txt}"
+        texto_linha = f"[{tipo}] {cod} - {txt}"
         pdf.multi_cell(0, 8, texto_linha.encode('latin-1', 'replace').decode('latin-1'))
     return bytes(pdf.output())
 
@@ -151,7 +145,6 @@ if menu == "Área do Aluno":
             dados = cursor.fetchall()
             
             if dados:
-                # Ordenação lógica baseada nos códigos
                 dados_ordenados = sorted(dados, key=lambda x: x[0])
                 
                 for cod, tipo, txt in dados_ordenados:
