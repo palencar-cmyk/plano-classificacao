@@ -44,7 +44,7 @@ def validar_codigo(codigo, tipo):
     elif tipo == "Atividade":
         return bool(re.match(r"^\d{2}\.\d{2}\.\d{2}\.?$", codigo)), "Formato ideal: XX.XX.XX. (ex: 01.01.01.)"
     elif tipo == "Tipo documental":
-        return bool(re.match(r"^\d{2}\.\d{2}\.\d{2}\.\d{2}\.?$", codigo)), "Formato ideal: XX.XX.XX.XX. (ex: 01.01.01.01.)"
+        return bool(re.match(r"^\d{2}\.\d{2}\.\d.2\.\d{2}\.?$", codigo)), "Formato ideal: XX.XX.XX.XX. (ex: 01.01.01.01.)"
     return False, ""
 
 def buscar_nome_elemento(matricula, codigo_prefixo):
@@ -84,7 +84,7 @@ class ProfessionalPDF(FPDF):
         self.set_font('Arial', 'I', 8)
         self.line(10, 275, 200, 275)
         self.cell(0, 10, self.encode_txt(f'Emitido por: {self.emitente} | Data: {self.data_emissao}'), 0, 0, 'L')
-        self.cell(0, 10, f'Pagina {self.page_no()}', 0, 0, 'R')
+        self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'R')
 
     def encode_txt(self, texto):
         if not texto:
@@ -116,24 +116,36 @@ def gerar_relatorio_final(orgao, emitente, matricula, membros, dados):
     pdf.cell(0, 8, " ESTRUTURA ARQUIVÍSTICA DO PLANO", 0, 1, 'L', fill=True)
     pdf.ln(4)
     
+    # Ordenação estrita baseada nas partes numéricas dos códigos para não quebrar a hierarquia
     dados_ordenados = sorted(dados, key=lambda x: [int(p) for p in re.findall(r'\d+', x[1])])
     
     for _, cod, tipo, txt in dados_ordenados:
-        indent = ""
-        if tipo == "Subfunção":
-            indent = "    "
+        # Define o recuo (margem esquerda) e a largura útil da célula de acordo com o nível
+        if tipo == "Função":
+            recuo_esquerdo = 10
+            largura_util = 190
+            pdf.set_font('Arial', 'B', 10)
+        elif tipo == "Subfunção":
+            recuo_esquerdo = 20
+            largura_util = 180
+            pdf.set_font('Arial', '', 10)
         elif tipo == "Atividade":
-            indent = "        "
-        elif tipo == "Tipo documental":
-            indent = "            "
+            recuo_esquerdo = 30
+            largura_util = 170
+            pdf.set_font('Arial', '', 10)
+        else: # Tipo documental
+            recuo_esquerdo = 40
+            largura_util = 160
+            pdf.set_font('Arial', 'I', 10)
         
-        texto_linha = f"{indent}{cod} - {txt} [{tipo}]"
+        texto_linha = f"{cod} - {txt}"
         
-        if pdf.get_y() > 250:
+        if pdf.get_y() > 245:
             pdf.add_page()
             
-        pdf.set_font('Arial', 'B' if tipo == 'Função' else '', 10)
-        pdf.multi_cell(190, 6, pdf.encode_txt(texto_linha))
+        # Posiciona horizontalmente respeitando o recuo estruturado
+        pdf.set_x(recuo_esquerdo)
+        pdf.multi_cell(largura_util, 6, pdf.encode_txt(texto_linha))
         
     return bytes(pdf.output())
 
@@ -347,7 +359,7 @@ elif menu == "Área do Professor (Admin)":
             else:
                 st.error("Credenciais inválidas.")
     else:
-        if st.sidebar.button("🚪 Sair do Panel Admin"):
+        if st.sidebar.button("🚪 Sair do Painel Admin"):
             del st.session_state['admin_logado']
             st.rerun()
             
