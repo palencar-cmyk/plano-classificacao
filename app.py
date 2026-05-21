@@ -79,9 +79,9 @@ def gerar_pdf(orgao, itens):
     
     for cod, tipo, txt in itens_ordenados:
         indent = ""
-        if tipo == "Subfunção": indent = "   "
-        elif tipo == "Atividade": indent = "      "
-        elif tipo == "Tipo documental": indent = "         "
+        if tipo == "Subfunção": indent = ""
+        elif tipo == "Atividade": indent = ""
+        elif tipo == "Tipo documental": indent = ""        "
         
         texto_linha = f"{indent}{cod} {txt}"
         pdf.multi_cell(0, 8, texto_linha.encode('latin-1', 'replace').decode('latin-1'))
