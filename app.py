@@ -51,7 +51,7 @@ def init_db():
 conn = init_db()
 cursor = conn.cursor()
 
-# --- FUNÇÕES DE VALIDAÇÃO ---
+# --- FUNÇÕES DE VALIDAÇÃO E BUSCA HIERÁRQUICA ---
 def validar_codigo(codigo, tipo):
     codigo = codigo.strip()
     if tipo == "Função":
@@ -63,6 +63,12 @@ def validar_codigo(codigo, tipo):
     elif tipo == "Tipo documental":
         return bool(re.match(r"^\d{2}\.\d{2}\.\d{2}\.\d{2}\.?$", codigo)), "Formato ideal: XX.XX.XX.XX. (ex: 01.01.01.01.)"
     return False, ""
+
+def buscar_nome_elemento(matricula, codigo_prefixo):
+    cursor.execute("SELECT texto FROM estrutura WHERE matricula = ? AND (codigo = ? OR codigo = ?)", 
+                   (matricula, codigo_prefixo, f"{codigo_prefixo}."))
+    resultado = cursor.fetchone()
+    return resultado[0] if resultado else "Elemento Pai Não Encontrado no Banco"
 
 # --- GERADOR DE PDF ---
 class PDF(FPDF):
@@ -83,9 +89,9 @@ def gerar_pdf(orgao, itens):
     pdf.ln(5)
     pdf.set_font("Arial", '', 11)
     
-    itens_ordenados = sorted(itens, key=lambda x: x[0])
+    itens_ordenados = sorted(itens, key=lambda x: x[1])
     
-    for cod, tipo, txt in itens_ordenados:
+    for _, cod, tipo, txt in itens_ordenados:
         texto_linha = f"[{tipo}] {cod} - {txt}"
         pdf.multi_cell(0, 8, texto_linha.encode('latin-1', 'replace').decode('latin-1'))
     return bytes(pdf.output())
@@ -100,7 +106,6 @@ if menu == "Área do Aluno":
     st.header("📝 Identificação do Aluno")
     
     if 'aluno_logado' not in st.session_state:
-        # Nova opção de escolha para facilitar o login e reentrada
         opcao_acesso = st.radio(
             "Selecione uma opção:",
             ["Primeiro Acesso (Criar Novo Perfil)", "Já Estou Cadastrado (Recuperar Progresso)"],
@@ -111,7 +116,6 @@ if menu == "Área do Aluno":
             matricula = st.text_input("Matrícula:").strip()
             nome = st.text_input("Nome Completo:").strip()
             
-            # O órgão só é obrigatório se for o primeiro acesso
             if opcao_acesso == "Primeiro Acesso (Criar Novo Perfil)":
                 orgao = st.text_input("Órgão do Plano de Classificação:").strip()
             else:
@@ -123,7 +127,6 @@ if menu == "Área do Aluno":
                 if not matricula or not nome:
                     st.error("Por favor, preencha a Matrícula e o Nome Completo.")
                 else:
-                    # Busca se a matrícula já existe no banco
                     cursor.execute("SELECT nome, orgao FROM alunos WHERE matricula = ?", (matricula,))
                     aluno_existente = cursor.fetchone()
                     
@@ -133,7 +136,7 @@ if menu == "Área do Aluno":
                             nome_digitado = " ".join(nome.strip().split()).lower()
                             
                             if nome_salvo != nome_digitado:
-                                st.error("Nome incorreto para a matrícula informada. Verifique se digitou o nome igual ao do cadastro inicial.")
+                                st.error("Nome incorreto para a matrícula informada.")
                             else:
                                 st.session_state['aluno_matricula'] = matricula
                                 st.session_state['aluno_nome'] = aluno_existente[0]
@@ -142,13 +145,13 @@ if menu == "Área do Aluno":
                                 st.success("Bem-vindo de volta! Seu progresso foi restaurado.")
                                 st.rerun()
                         else:
-                            st.error(f"A matrícula '{matricula}' não foi encontrada. Se for seu primeiro acesso, selecione a opção acima.")
+                            st.error(f"A matrícula '{matricula}' não foi encontrada.")
                     
-                    else: # Fluxo de Primeiro Acesso
+                    else: 
                         if not orgao:
                             st.error("Por favor, preencha o campo 'Órgão do Plano de Classificação'.")
                         elif aluno_existente:
-                            st.error(f"A matrícula '{matricula}' já está cadastrada no sistema. Se você deseja continuar seu trabalho, marque a opção 'Já Estou Cadastrado'.")
+                            st.error(f"A matrícula '{matricula}' já está cadastrada no sistema.")
                         else:
                             cursor.execute("INSERT INTO alunos (matricula, nome, orgao) VALUES (?, ?, ?)", (matricula, nome, orgao))
                             conn.commit()
@@ -156,7 +159,7 @@ if menu == "Área do Aluno":
                             st.session_state['aluno_nome'] = nome
                             st.session_state['aluno_orgao'] = orgao
                             st.session_state['aluno_logado'] = True
-                            st.success("Perfil criado com sucesso! Comece a estruturar seu plano.")
+                            st.success("Perfil criado com sucesso!")
                             st.rerun()
     else:
         st.info(f"Estudante: **{st.session_state['aluno_nome']}** | Matrícula: **{st.session_state['aluno_matricula']}** | Órgão: **{st.session_state['aluno_orgao']}**")
@@ -165,91 +168,8 @@ if menu == "Área do Aluno":
             st.rerun()
             
         st.write("---")
-        st.header("📁 Elementos do seu Plano de Classificação")
+        st.header("📁 Gerenciamento do seu Plano de Classificação")
         
-        tab1, tab2 = st.tabs(["Inserir Níveis / Elementos", "Visualizar Estrutura & Exportar PDF"])
+        tab1, tab2 = st.tabs(["➕ Inserir Elementos", "🔍 Visualizar, Editar & Exportar PDF"])
         
         with tab1:
-            tipo_item = st.selectbox("Nível Hierárquico:", ["Função", "Subfunção", "Atividade", "Tipo documental"])
-            codigo_item = st.text_input("Código Numérico:", help="Ex: 01, 01.01., 01.01.01.")
-            texto_item = st.text_area("Descrição/Texto (Máx 250 caracteres):", max_chars=250)
-            
-            if st.button("Salvar Elemento"):
-                if not codigo_item.strip() or not texto_item.strip():
-                    st.error("Preencha todos os campos antes de salvar.")
-                else:
-                    valido, formato_correto = validar_codigo(codigo_item, tipo_item)
-                    if not valido:
-                        st.error(f"Código inválido para '{tipo_item}'. {formato_correto}")
-                    else:
-                        cursor.execute("INSERT INTO estrutura (matricula, tipo, codigo, texto) VALUES (?, ?, ?, ?)",
-                                       (st.session_state['aluno_matricula'], tipo_item, codigo_item.strip(), texto_item.strip()))
-                        conn.commit()
-                        st.success(f"{tipo_item} adicionada com sucesso e salva na sua conta!")
-                        st.rerun()
-                        
-        with tab2:
-            st.subheader(f"Estrutura Atual: {st.session_state['aluno_orgao']}")
-            
-            cursor.execute("SELECT codigo, tipo, texto FROM estrutura WHERE matricula = ?", (st.session_state['aluno_matricula'],))
-            dados = cursor.fetchall()
-            
-            if dados:
-                dados_ordenados = sorted(dados, key=lambda x: x[0])
-                
-                for cod, tipo, txt in dados_ordenados:
-                    if tipo == "Função":
-                        st.markdown(f"**{cod} {txt}**")
-                    elif tipo == "Subfunção":
-                        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;📄 {cod} {txt}")
-                    elif tipo == "Atividade":
-                        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;🔹 {cod} {txt}")
-                    elif tipo == "Tipo documental":
-                        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;🔸 *{cod} {txt}*")
-                
-                st.write("---")
-                pdf_data = gerar_pdf(st.session_state['aluno_orgao'], dados)
-                st.download_button(
-                    label="📄 Exportar Relatório em PDF",
-                    data=pdf_data,
-                    file_name=f"Relatorio_PCD_{st.session_state['aluno_matricula']}.pdf",
-                    mime="application/pdf"
-                )
-            else:
-                st.warning("Nenhum item cadastrado por você ainda.")
-
-elif menu == "Área do Professor (Admin)":
-    st.header("🔒 Painel do Administrador")
-    
-    if 'admin_logado' not in st.session_state:
-        usuario = st.text_input("Usuário Admin:")
-        senha = st.text_input("Senha Admin:", type="password")
-        if st.button("Acessar Painel"):
-            if usuario == "Admin123" and senha == "123Admin":
-                st.session_state['admin_logado'] = True
-                st.rerun()
-            else:
-                st.error("Credenciais incorretas.")
-    else:
-        if st.button("Sair do Panel Admin"):
-            del st.session_state['admin_logado']
-            st.rerun()
-            
-        st.subheader("Planos de Classificação Cadastrados")
-        
-        cursor.execute("SELECT matricula, nome, orgao FROM alunos")
-        lista_alunos = cursor.fetchall()
-        
-        if lista_alunos:
-            for al_mat, al_nome, al_org in lista_alunos:
-                with st.expander(f"Aluno: {al_nome} (Matrícula: {al_mat}) - Órgão: {al_org}"):
-                    cursor.execute("SELECT codigo, tipo, texto FROM estrutura WHERE matricula = ?", (al_mat,))
-                    itens_aluno = cursor.fetchall()
-                    if itens_aluno:
-                        itens_aluno = sorted(itens_aluno, key=lambda x: x[0])
-                        for cod, tipo, txt in itens_aluno:
-                            st.write(f"**{cod}** [{tipo}] - {txt}")
-                    else:
-                        st.write("Nenhum item cadastrado por este aluno.")
-        else:
-            st.info("Nenhum aluno realizou cadastros no sistema até o momento.")
