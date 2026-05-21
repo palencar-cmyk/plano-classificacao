@@ -85,7 +85,7 @@ def gerar_pdf(orgao, itens):
         
         texto_linha = f"{indent}{cod} {txt}"
         pdf.multi_cell(0, 8, texto_linha.encode('latin-1', 'replace').decode('latin-1'))
-    return pdf.output(dest='S')
+    return bytes(pdf.output())
 
 # --- INTERFACE INICIAL ---
 st.title("Plano de Classificação Online")
