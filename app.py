@@ -17,9 +17,15 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- BANCO DE DADOS PERSISTENTE LOCAL ---
-# Salvando em um diretório que o Streamlit Cloud não apaga ao reiniciar o app
-DB_PATH = os.path.join(os.getcwd(), "pcd_data_permanente.db")
+# --- BANCO DE DADOS PERSISTENTE SEGURO ---
+if not os.path.exists("/data"):
+    try:
+        os.makedirs("/data")
+        DB_PATH = "/data/pcd_data_permanente.db"
+    except Exception:
+        DB_PATH = "pcd_data_permanente.db"
+else:
+    DB_PATH = "/data/pcd_data_permanente.db"
 
 def init_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -91,45 +97,67 @@ st.caption("Disciplina de Tópicos Especiais 1 - Salvamento de Progresso Ativo")
 menu = st.sidebar.radio("Navegação", ["Área do Aluno", "Área do Professor (Admin)"])
 
 if menu == "Área do Aluno":
-    st.header("📝 Identificação / Recuperação de Progresso")
+    st.header("📝 Identificação do Aluno")
     
     if 'aluno_logado' not in st.session_state:
+        # Nova opção de escolha para facilitar o login e reentrada
+        opcao_acesso = st.radio(
+            "Selecione uma opção:",
+            ["Primeiro Acesso (Criar Novo Perfil)", "Já Estou Cadastrado (Recuperar Progresso)"],
+            horizontal=True
+        )
+        
         with st.form("cadastro_aluno"):
-            nome = st.text_input("Nome Completo:").strip()
             matricula = st.text_input("Matrícula:").strip()
-            orgao = st.text_input("Órgão do Plano de Classificação:").strip()
-            enviar = st.form_submit_button("Entrar / Continuar de Onde Parei")
+            nome = st.text_input("Nome Completo:").strip()
+            
+            # O órgão só é obrigatório se for o primeiro acesso
+            if opcao_acesso == "Primeiro Acesso (Criar Novo Perfil)":
+                orgao = st.text_input("Órgão do Plano de Classificação:").strip()
+            else:
+                orgao = ""
+                
+            enviar = st.form_submit_button("Entrar no Sistema")
             
             if enviar:
-                if nome and matricula and orgao:
-                    # Busca se a matrícula já existe
+                if not matricula or not nome:
+                    st.error("Por favor, preencha a Matrícula e o Nome Completo.")
+                else:
+                    # Busca se a matrícula já existe no banco
                     cursor.execute("SELECT nome, orgao FROM alunos WHERE matricula = ?", (matricula,))
                     aluno_existente = cursor.fetchone()
                     
-                    if aluno_existente:
-                        # Se já existe, checa se o nome bate para evitar duplicados com dados errados
-                        if aluno_existente[0].lower() != nome.lower():
-                            st.error(f"A matrícula '{matricula}' já está registrada para outro estudante.")
+                    if opcao_acesso == "Já Estou Cadastrado (Recuperar Progresso)":
+                        if aluno_existente:
+                            nome_salvo = " ".join(aluno_existente[0].strip().split()).lower()
+                            nome_digitado = " ".join(nome.strip().split()).lower()
+                            
+                            if nome_salvo != nome_digitado:
+                                st.error("Nome incorreto para a matrícula informada. Verifique se digitou o nome igual ao do cadastro inicial.")
+                            else:
+                                st.session_state['aluno_matricula'] = matricula
+                                st.session_state['aluno_nome'] = aluno_existente[0]
+                                st.session_state['aluno_orgao'] = aluno_existente[1]
+                                st.session_state['aluno_logado'] = True
+                                st.success("Bem-vindo de volta! Seu progresso foi restaurado.")
+                                st.rerun()
                         else:
-                            # Se bater nome e matrícula, recupera a sessão do aluno antigo
+                            st.error(f"A matrícula '{matricula}' não foi encontrada. Se for seu primeiro acesso, selecione a opção acima.")
+                    
+                    else: # Fluxo de Primeiro Acesso
+                        if not orgao:
+                            st.error("Por favor, preencha o campo 'Órgão do Plano de Classificação'.")
+                        elif aluno_existente:
+                            st.error(f"A matrícula '{matricula}' já está cadastrada no sistema. Se você deseja continuar seu trabalho, marque a opção 'Já Estou Cadastrado'.")
+                        else:
+                            cursor.execute("INSERT INTO alunos (matricula, nome, orgao) VALUES (?, ?, ?)", (matricula, nome, orgao))
+                            conn.commit()
                             st.session_state['aluno_matricula'] = matricula
-                            st.session_state['aluno_nome'] = aluno_existente[0]
-                            st.session_state['aluno_orgao'] = aluno_existente[1]
+                            st.session_state['aluno_nome'] = nome
+                            st.session_state['aluno_orgao'] = orgao
                             st.session_state['aluno_logado'] = True
-                            st.success("Seu progresso foi localizado e recuperado com sucesso!")
+                            st.success("Perfil criado com sucesso! Comece a estruturar seu plano.")
                             st.rerun()
-                    else:
-                        # Se for inédito, cadastra um novo
-                        cursor.execute("INSERT INTO alunos (matricula, nome, orgao) VALUES (?, ?, ?)", (matricula, nome, orgao))
-                        conn.commit()
-                        st.session_state['aluno_matricula'] = matricula
-                        st.session_state['aluno_nome'] = nome
-                        st.session_state['aluno_orgao'] = orgao
-                        st.session_state['aluno_logado'] = True
-                        st.success("Novo perfil criado com sucesso!")
-                        st.rerun()
-                else:
-                    st.error("Por favor, preencha todos os campos para acessar.")
     else:
         st.info(f"Estudante: **{st.session_state['aluno_nome']}** | Matrícula: **{st.session_state['aluno_matricula']}** | Órgão: **{st.session_state['aluno_orgao']}**")
         if st.button("Sair do Sistema (Salva automaticamente)"):
@@ -203,7 +231,7 @@ elif menu == "Área do Professor (Admin)":
             else:
                 st.error("Credenciais incorretas.")
     else:
-        if st.button("Sair do Painel Admin"):
+        if st.button("Sair do Panel Admin"):
             del st.session_state['admin_logado']
             st.rerun()
             
