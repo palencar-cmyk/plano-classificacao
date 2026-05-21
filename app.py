@@ -2,6 +2,7 @@ import streamlit as st
 import sqlite3
 import os
 import re
+import time
 from datetime import datetime
 from fpdf import FPDF
 
@@ -38,26 +39,36 @@ def init_db():
 conn = init_db()
 cursor = conn.cursor()
 
+# --- DEFINIÇÃO DA CHAVE MESTRA DE RECUPERAÇÃO ---
+CHAVE_MESTRA_RECUPERACAO = "UFF#Admin#Seguro#2026"
+
+# --- INICIALIZAÇÃO DE CONTROLE ANTI-SPAM ---
+if 'last_submit_time' not in st.session_state:
+    st.session_state['last_submit_time'] = 0.0
+if 'last_submit_text' not in st.session_state:
+    st.session_state['last_submit_text'] = ""
+
 # --- FUNÇÕES DE AUXÍLIO E GERAÇÃO DE CÓDIGOS AUTOMÁTICOS ---
 def obter_proximo_codigo(matricula, tipo, pai_codigo=None):
-    """Gera o próximo código garantindo total resiliência com dados antigos cadastrados com ou sem ponto"""
+    """Gera códigos automáticos tratando corretamente os pontos finais fixos da árvore de classificação."""
     if tipo == "Função":
         cursor.execute("SELECT codigo FROM estrutura WHERE matricula = ? AND tipo = 'Função'", (matricula,))
         codigos = []
         for x in cursor.fetchall():
-            c_limpo = x[0].strip('.')
+            c_limpo = x[0].replace('.', '').strip()
             if c_limpo.isdigit():
                 codigos.append(int(c_limpo))
         proximo = max(codigos) + 1 if codigos else 1
         return f"{proximo:02d}."
         
     elif tipo == "Subfunção" and pai_codigo:
-        pai_limpo = pai_codigo.strip('.')
-        cursor.execute("SELECT codigo FROM estrutura WHERE matricula = ? AND tipo = 'Subfunção' AND (codigo LIKE ? OR codigo LIKE ?)", 
-                       (matricula, f"{pai_limpo}.%", f"{pai_limpo}%"))
+        pai_limpo = pai_codigo.rstrip('.')
+        # Busca filhos diretos vinculados àquela matrícula específica
+        cursor.execute("SELECT codigo FROM estrutura WHERE matricula = ? AND tipo = 'Subfunção' AND codigo LIKE ?", 
+                       (matricula, f"{pai_limpo}.%"))
         sufixos = []
         for row in cursor.fetchall():
-            partes = row[0].strip('.').split('.')
+            partes = row[0].rstrip('.').split('.')
             if len(partes) >= 2:
                 try: sufixos.append(int(partes[1]))
                 except ValueError: pass
@@ -65,12 +76,12 @@ def obter_proximo_codigo(matricula, tipo, pai_codigo=None):
         return f"{pai_limpo}.{proximo:02d}."
         
     elif tipo == "Atividade" and pai_codigo:
-        pai_limpo = pai_codigo.strip('.')
-        cursor.execute("SELECT codigo FROM estrutura WHERE matricula = ? AND tipo = 'Atividade' AND (codigo LIKE ? OR codigo LIKE ?)", 
-                       (matricula, f"{pai_limpo}.%", f"{pai_limpo}%"))
+        pai_limpo = pai_codigo.rstrip('.')
+        cursor.execute("SELECT codigo FROM estrutura WHERE matricula = ? AND tipo = 'Atividade' AND codigo LIKE ?", 
+                       (matricula, f"{pai_limpo}.%"))
         sufixos = []
         for row in cursor.fetchall():
-            partes = row[0].strip('.').split('.')
+            partes = row[0].rstrip('.').split('.')
             if len(partes) >= 3:
                 try: sufixos.append(int(partes[2]))
                 except ValueError: pass
@@ -78,12 +89,12 @@ def obter_proximo_codigo(matricula, tipo, pai_codigo=None):
         return f"{pai_limpo}.{proximo:02d}."
         
     elif tipo == "Tipo documental" and pai_codigo:
-        pai_limpo = pai_codigo.strip('.')
-        cursor.execute("SELECT codigo FROM estrutura WHERE matricula = ? AND tipo = 'Tipo documental' AND (codigo LIKE ? OR codigo LIKE ?)", 
-                       (matricula, f"{pai_limpo}.%", f"{pai_limpo}%"))
+        pai_limpo = pai_codigo.rstrip('.')
+        cursor.execute("SELECT codigo FROM estrutura WHERE matricula = ? AND tipo = 'Tipo documental' AND codigo LIKE ?", 
+                       (matricula, f"{pai_limpo}.%"))
         sufixos = []
         for row in cursor.fetchall():
-            partes = row[0].strip('.').split('.')
+            partes = row[0].rstrip('.').split('.')
             if len(partes) >= 4:
                 try: sufixos.append(int(partes[3]))
                 except ValueError: pass
@@ -107,7 +118,7 @@ class CustomPCDPDF(FPDF):
         self.cell(0, 5, 'DEPARTAMENTO DE CIÊNCIA DA INFORMAÇÃO', 0, 1, 'C')
         self.cell(0, 5, 'CURSO DE GRADUAÇÃO EM ARQUIVOLOGIA', 0, 1, 'C')
         self.set_font('Arial', '', 10)
-        self.cell(0, 5, 'DISCIPLINA DE TÓPICOS ESPECIAIS 1', 0, 1, 'C')
+        self.cell(0, 5, 'DISCIPLINA DE TOPICOS ESPECIAIS 1', 0, 1, 'C')
         self.cell(0, 5, 'PROFESSORES: CLARISSA SCHMIDT E PAULO ALENCAR', 0, 1, 'C')
         self.ln(10)
         self.line(10, 42, 200, 42)
@@ -123,6 +134,11 @@ class CustomPCDPDF(FPDF):
         if not texto: return ""
         return str(texto).replace('–', '-').replace('—', '-').encode('latin-1', 'ignore').decode('latin-1')
 
+def ordenar_codigos_arquivisticos(item):
+    """Função chave para ordenar corretamente strings de código compostas como 01.02.03.04."""
+    partes = re.findall(r'\d+', item[1])
+    return [int(p) for p in partes]
+
 def gerar_relatorio_final(orgao, emitente, matricula, membros, dados):
     pdf = CustomPCDPDF(orgao, emitente, membros)
     pdf.set_auto_page_break(auto=True, margin=20)
@@ -134,7 +150,7 @@ def gerar_relatorio_final(orgao, emitente, matricula, membros, dados):
     pdf.cell(0, 8, pdf.encode_txt(f"ORGAO PRODUTOR: {orgao.upper()}"), 0, 1, 'C')
     pdf.ln(5)
     
-    # Grupo
+    # Componentes
     pdf.set_font('Arial', 'B', 11)
     pdf.set_fill_color(230, 235, 240)
     pdf.cell(0, 8, " COMPONENTES DO GRUPO", 0, 1, 'L', fill=True)
@@ -148,7 +164,7 @@ def gerar_relatorio_final(orgao, emitente, matricula, membros, dados):
     pdf.cell(0, 8, " ESTRUTURA ARQUIVISTICA DO PLANO", 0, 1, 'L', fill=True)
     pdf.ln(4)
     
-    dados_ordenados = sorted(dados, key=lambda x: [int(p) for p in re.findall(r'\d+', x[1])])
+    dados_ordenados = sorted(dados, key=ordenar_codigos_arquivisticos)
     
     for _, cod, tipo, txt in dados_ordenados:
         cod_exibicao = cod if cod.endswith('.') else f"{cod}."
@@ -269,6 +285,7 @@ if menu == "Área do Aluno":
             mat_atual = st.session_state['aluno_matricula']
             
             codigo_sugerido = ""
+            pai_info = ""
             
             if tipo_item == "Função":
                 codigo_sugerido = obter_proximo_codigo(mat_atual, "Função")
@@ -280,6 +297,7 @@ if menu == "Área do Aluno":
                 if funcoes:
                     pai = st.selectbox("Selecione a Função Pai:", funcoes, format_func=lambda x: f"{x[0]} {x[1]}")
                     codigo_sugerido = obter_proximo_codigo(mat_atual, "Subfunção", pai[0])
+                    pai_info = f"Função {pai[0]} ({pai[1]})"
                     st.info(f"Código Estrutural Gerado: **{codigo_sugerido}**")
                 else:
                     st.warning("Adicione uma Função antes de criar uma Subfunção.")
@@ -290,6 +308,7 @@ if menu == "Área do Aluno":
                 if subfuncoes:
                     pai = st.selectbox("Selecione a Subfunção Pai:", subfuncoes, format_func=lambda x: f"{x[0]} {x[1]}")
                     codigo_sugerido = obter_proximo_codigo(mat_atual, "Atividade", pai[0])
+                    pai_info = f"Subfunção {pai[0]} ({pai[1]})"
                     st.info(f"Código Estrutural Gerado: **{codigo_sugerido}**")
                 else:
                     st.warning("Adicione uma Subfunção antes de criar uma Atividade.")
@@ -300,6 +319,7 @@ if menu == "Área do Aluno":
                 if atividades:
                     pai = st.selectbox("Selecione a Atividade Pai:", atividades, format_func=lambda x: f"{x[0]} {x[1]}")
                     codigo_sugerido = obter_proximo_codigo(mat_atual, "Tipo documental", pai[0])
+                    pai_info = f"Atividade {pai[0]} ({pai[1]})"
                     st.info(f"Código Estrutural Gerado: **{codigo_sugerido}**")
                 else:
                     st.warning("Adicione uma Atividade antes de criar um Tipo Documental.")
@@ -307,15 +327,32 @@ if menu == "Área do Aluno":
             texto_item = st.text_area("Descrição/Texto do Item:", max_chars=250)
             
             if codigo_sugerido and texto_item.strip():
-                if st.button(f"💾 Gravar {tipo_item}"):
-                    try:
-                        cursor.execute("INSERT INTO estrutura (matricula, tipo, codigo, texto) VALUES (?, ?, ?, ?)", 
-                                       (mat_atual, tipo_item, codigo_sugerido, texto_item.strip()))
-                        conn.commit()
-                        st.success(f"{tipo_item} gravado com sucesso!")
-                        st.rerun()
-                    except sqlite3.IntegrityError:
-                        st.error("Erro: Este código já existe nesta conta.")
+                with st.popover(f"💾 Gravar {tipo_item}"):
+                    st.warning("⚠️ Confirma a vinculação estrutural deste item?")
+                    if pai_info:
+                        st.write(f"📌 **Vinculado diretamente a:** `{pai_info}`")
+                    st.write(f"🔢 **Código gerado:** {codigo_sugerido}")
+                    st.write(f"📝 **Descrição:** {texto_item.strip()}")
+                    
+                    if st.button("Sim, Confirmar e Salvar", key=f"btn_confirmar_{tipo_item}"):
+                        agora = time.time()
+                        tempo_decorrido = agora - st.session_state['last_submit_time']
+                        texto_limpo = texto_item.strip()
+                        
+                        if tempo_decorrido < 3.0 and texto_limpo == st.session_state['last_submit_text']:
+                            st.error("⛔ Item repetido detectado! Aguarde 3 segundos para reenviar o mesmo texto.")
+                        else:
+                            st.session_state['last_submit_time'] = agora
+                            st.session_state['last_submit_text'] = texto_limpo
+                            
+                            try:
+                                cursor.execute("INSERT INTO estrutura (matricula, tipo, codigo, texto) VALUES (?, ?, ?, ?)", 
+                                               (mat_atual, tipo_item, codigo_sugerido, texto_limpo))
+                                conn.commit()
+                                st.success(f"{tipo_item} gravado com sucesso!")
+                                st.rerun()
+                            except sqlite3.IntegrityError:
+                                st.error("Erro: Este código já existe nesta conta.")
             else:
                 st.caption("Preencha o campo de texto para habilitar o salvamento.")
 
@@ -325,7 +362,7 @@ if menu == "Área do Aluno":
             dados = cursor.fetchall()
             
             if dados:
-                dados_ordenados = sorted(dados, key=lambda x: [int(p) for p in re.findall(r'\d+', x[1])])
+                dados_ordenados = sorted(dados, key=ordenar_codigos_arquivisticos)
                 for item_id, cod, tipo, txt in dados_ordenados:
                     cod_exibicao = cod if cod.endswith('.') else f"{cod}."
                     if tipo == "Função": st.markdown(f"**{cod_exibicao} {txt}**")
@@ -389,57 +426,87 @@ elif menu == "Área do Professor (Admin)":
                     
         with col_btn_esqueci:
             with st.popover("Recuperar Senha"):
-                st.write("Deseja restaurar as credenciais?")
-                st.caption("A redefinição irá gerar uma credencial temporária para o e-mail: palencar@id.uff.br")
-                if st.button("Confirmar Redefinição"):
-                    nova_senha_temp = "UFFRecupera2026Doc"
-                    cursor.execute("UPDATE admin_config SET senha = ? WHERE usuario = 'Admin123'", (nova_senha_temp,))
-                    conn.commit()
-                    st.info("E-mail de recuperação enviado para palencar@id.uff.br!")
-                    st.code(f"Usuário: Admin123\nSenha Temporária: {nova_senha_temp}")
+                st.subheader("🔑 Recuperação via Chave Mestra")
+                st.write("Insira a chave secreta de segurança institucional para redefinir as credenciais:")
+                
+                input_chave_mestra = st.text_input("Chave Mestra de Segurança:", type="password", key="input_master_key")
+                nova_senha_emergencia = st.text_input("Defina sua Nova Senha do Painel:", type="password", key="input_new_pass_emergency")
+                
+                if st.button("Confirmar Alteração"):
+                    if input_chave_mestra == CHAVE_MESTRA_RECUPERACAO:
+                        if not nova_senha_emergencia.strip():
+                            st.error("A nova senha não pode estar em branco.")
+                        else:
+                            cursor.execute("UPDATE admin_config SET senha = ? WHERE usuario = 'Admin123'", (nova_senha_emergencia.strip(),))
+                            conn.commit()
+                            st.success("✅ Autenticado! Senha redefinida. Faça login.")
+                            st.rerun()
+                    else:
+                        st.error("❌ Chave Mestra inválida. Acesso bloqueado.")
 
     else:
         if st.sidebar.button("🚪 Sair do Painel Admin"):
             del st.session_state['admin_logado']
             st.rerun()
             
-        st.subheader("📚 Alunos e Estruturas Cadastradas")
-        cursor.execute("SELECT matricula, nome, orgao FROM alunos")
-        lista_alunos = cursor.fetchall()
+        tab_prof1, tab_prof2 = st.tabs(["📚 Alunos e Estruturas Cadastradas", "🔒 Configurações de Segurança"])
         
-        if lista_alunos:
-            for al_mat, al_nome, al_org in lista_alunos:
-                cursor.execute("SELECT nome_membro, matricula_membro FROM membros_grupo WHERE matricula_lider = ?", (al_mat,))
-                membros_al = cursor.fetchall()
-                texto_membros = ", ".join([f"{n} ({m})" for n, m in membros_al]) if membros_al else "Apenas o líder"
-                
-                with st.expander(f"👤 Grupo de {al_nome} — Órão: {al_org} ({texto_membros})"):
-                    if st.checkbox("Habilitar exclusão permanente", key=f"chk_total_{al_mat}"):
-                        if st.button(f"🔥 Apagar Grupo de {al_nome}", key=f"btn_total_{al_mat}"):
-                            cursor.execute("DELETE FROM estrutura WHERE matricula = ?", (al_mat,))
-                            cursor.execute("DELETE FROM membros_grupo WHERE matricula_lider = ?", (al_mat,))
-                            cursor.execute("DELETE FROM alunos WHERE matricula = ?", (al_mat,))
-                            conn.commit()
-                            st.rerun()
-                            
-                    st.write("---")
-                    cursor.execute("SELECT id, codigo, tipo, texto FROM estrutura WHERE matricula = ?", (al_mat,))
-                    itens_aluno = cursor.fetchall()
+        with tab_prof1:
+            cursor.execute("SELECT matricula, nome, orgao FROM alunos")
+            lista_alunos = cursor.fetchall()
+            
+            if lista_alunos:
+                for al_mat, al_nome, al_org in lista_alunos:
+                    cursor.execute("SELECT nome_membro, matricula_membro FROM membros_grupo WHERE matricula_lider = ?", (al_mat,))
+                    membros_al = cursor.fetchall()
+                    texto_membros = ", ".join([f"{n} ({m})" for n, m in membros_al]) if membros_al else "Apenas o líder"
                     
-                    if itens_aluno:
-                        itens_ordenados = sorted(itens_aluno, key=lambda x: [int(p) for p in re.findall(r'\d+', x[1])])
-                        for item_id, cod, tipo, txt in itens_ordenados:
-                            col_dados, col_prof_edit, col_prof_del = st.columns([5, 3, 1])
-                            col_dados.write(f"**{cod}** `[{tipo}]` — {txt}")
-                            with col_prof_edit:
-                                with st.popover("Corrigir"):
-                                    txt_professor = st.text_input("Alterar descrição:", value=txt, key=f"prof_in_{item_id}")
-                                    if st.button("Salvar", key=f"prof_btn_sav_{item_id}"):
-                                        cursor.execute("UPDATE estrutura SET texto = ? WHERE id = ?", (txt_professor.strip(), item_id))
-                                        conn.commit()
-                                        st.rerun()
-                            if col_prof_del.button("🗑️", key=f"prof_del_it_{item_id}"):
-                                cursor.execute("DELETE FROM estrutura WHERE id = ?", (item_id,))
+                    with st.expander(f"👤 Grupo de {al_nome} — Órgão: {al_org} ({texto_membros})"):
+                        if st.checkbox("Habilitar exclusão permanente", key=f"chk_total_{al_mat}"):
+                            if st.button(f"🔥 Apagar Grupo de {al_nome}", key=f"btn_total_{al_mat}"):
+                                cursor.execute("DELETE FROM estrutura WHERE matricula = ?", (al_mat,))
+                                cursor.execute("DELETE FROM membros_grupo WHERE matricula_lider = ?", (al_mat,))
+                                cursor.execute("DELETE FROM alunos WHERE matricula = ?", (al_mat,))
                                 conn.commit()
-                                l_mat = al_mat
                                 st.rerun()
+                                
+                        st.write("---")
+                        cursor.execute("SELECT id, codigo, tipo, texto FROM estrutura WHERE matricula = ?", (al_mat,))
+                        itens_aluno = cursor.fetchall()
+                        
+                        if itens_aluno:
+                            itens_ordenados = sorted(itens_aluno, key=ordenar_codigos_arquivisticos)
+                            for item_id, cod, tipo, txt in itens_ordenados:
+                                col_dados, col_prof_edit, col_prof_del = st.columns([5, 3, 1])
+                                col_dados.write(f"**{cod}** `[{tipo}]` — {txt}")
+                                with col_prof_edit:
+                                    with st.popover("Corrigir"):
+                                        txt_professor = st.text_input("Alterar descrição:", value=txt, key=f"prof_in_{item_id}")
+                                        if st.button("Salvar", key=f"prof_btn_sav_{item_id}"):
+                                            cursor.execute("UPDATE estrutura SET texto = ? WHERE id = ?", (txt_professor.strip(), item_id))
+                                            conn.commit()
+                                            st.rerun()
+                                if col_prof_del.button("🗑️", key=f"prof_del_it_{item_id}"):
+                                    cursor.execute("DELETE FROM estrutura WHERE id = ?", (item_id,))
+                                    conn.commit()
+                                    st.rerun()
+            else:
+                st.info("Nenhum plano ou aluno cadastrado até o momento.")
+                
+        with tab_prof2:
+            st.subheader("Alterar Senha do Administrador")
+            st.write("Atualize os dados de acesso para remover a credencial inicial.")
+            
+            with st.form("form_senha_admin", clear_on_submit=True):
+                nova_senha_def = st.text_input("Digite a Nova Senha Forte:", type="password")
+                confirma_senha_def = st.text_input("Confirme a Nova Senha Forte:", type="password")
+                
+                if st.form_submit_button("🔒 Salvar Nova Senha"):
+                    if not nova_senha_def.strip():
+                        st.error("A senha não pode estar em branco.")
+                    elif nova_senha_def != confirma_senha_def:
+                        st.error("As senhas inseridas não coincidem.")
+                    else:
+                        cursor.execute("UPDATE admin_config SET senha = ? WHERE usuario = 'Admin123'", (nova_senha_def.strip(),))
+                        conn.commit()
+                        st.success("Senha alterada com sucesso!")
