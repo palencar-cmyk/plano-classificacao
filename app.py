@@ -14,7 +14,7 @@ st.markdown("""
     .stButton>button { background-color: #2C3E50; color: white; border-radius: 4px; }
     .stButton>button:hover { background-color: #34495E; color: white; }
     </style>
-""", unsafe_scale=True)
+""", unsafe_allow_html=True)
 
 # --- BANCO DE DADOS ---
 def init_db():
