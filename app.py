@@ -36,7 +36,7 @@ cursor = conn.cursor()
 
 # --- FUNÇÕES DE VALIDAÇÃO E BUSCA ---
 def validar_codigo(codigo, tipo):
-    codigo = code_limpo = codigo.strip()
+    codigo = codigo.strip()
     if tipo == "Função":
         return bool(re.match(r"^\d{2}\.?$", codigo)), "Formato ideal: XX (ex: 01)"
     elif tipo == "Subfunção":
@@ -129,10 +129,10 @@ def gerar_relatorio_final(orgao, emitente, matricula, membros, dados):
         
         texto_linha = f"{indent}{cod} - {txt} [{tipo}]"
         
-        if pdf.get_y() > 255:
+        if pdf.get_y() > 250:
             pdf.add_page()
             
-        pdf.set_font('Arial', 'B' if tipo == 'Function' or tipo == 'Função' else '', 10)
+        pdf.set_font('Arial', 'B' if tipo == 'Função' else '', 10)
         pdf.multi_cell(190, 6, pdf.encode_txt(texto_linha))
         
     return bytes(pdf.output())
@@ -347,7 +347,7 @@ elif menu == "Área do Professor (Admin)":
             else:
                 st.error("Credenciais inválidas.")
     else:
-        if st.sidebar.button("🚪 Sair do Painel Admin"):
+        if st.sidebar.button("🚪 Sair do Panel Admin"):
             del st.session_state['admin_logado']
             st.rerun()
             
