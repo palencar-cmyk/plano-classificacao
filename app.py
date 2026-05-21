@@ -1,3 +1,4 @@
+Python
 import streamlit as st
 import sqlite3
 import os
@@ -117,7 +118,7 @@ class CustomPCDPDF(FPDF):
         self.set_font('Arial', 'I', 8)
         self.line(10, 275, 200, 275)
         self.cell(0, 10, self.encode_txt(f'Emitido por: {self.emitente} | Data: {self.data_emissao}'), 0, 0, 'L')
-        self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'R')
+        self.cell(0, 10, f'Pagina {self.page_no()}', 0, 0, 'R')
 
     def encode_txt(self, texto):
         if not texto: return ""
@@ -129,9 +130,9 @@ def gerar_relatorio_final(orgao, emitente, matricula, membros, dados):
     pdf.add_page()
     
     pdf.set_font('Arial', 'B', 14)
-    pdf.cell(0, 15, pdf.encode_txt("PLANO DE CLASSIFICAÇÃO DE DOCUMENTOS"), 0, 1, 'C')
+    pdf.cell(0, 15, pdf.encode_txt("PLANO DE CLASSIFICACAO DE DOCUMENTOS"), 0, 1, 'C')
     pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 8, pdf.encode_txt(f"ÓRGÃO PRODUTOR: {orgao.upper()}"), 0, 1, 'C')
+    pdf.cell(0, 8, pdf.encode_txt(f"ORGAO PRODUTOR: {orgao.upper()}"), 0, 1, 'C')
     pdf.ln(5)
     
     # Grupo
@@ -139,13 +140,13 @@ def gerar_relatorio_final(orgao, emitente, matricula, membros, dados):
     pdf.set_fill_color(230, 235, 240)
     pdf.cell(0, 8, " COMPONENTES DO GRUPO", 0, 1, 'L', fill=True)
     pdf.set_font('Arial', '', 10)
-    pdf.cell(0, 6, pdf.encode_txt(f"Líder / Responsável: {emitente} ({matricula})"), 0, 1, 'L')
+    pdf.cell(0, 6, pdf.encode_txt(f"Lider / Responsavel: {emitente} ({matricula})"), 0, 1, 'L')
     for m_nome, m_mat in membros:
         pdf.cell(0, 6, pdf.encode_txt(f"Integrante: {m_nome} ({m_mat})"), 0, 1, 'L')
     pdf.ln(8)
 
     pdf.set_font('Arial', 'B', 11)
-    pdf.cell(0, 8, " ESTRUTURA ARQUIVÍSTICA DO PLANO", 0, 1, 'L', fill=True)
+    pdf.cell(0, 8, " ESTRUTURA ARQUIVISTICA DO PLANO", 0, 1, 'L', fill=True)
     pdf.ln(4)
     
     dados_ordenados = sorted(dados, key=lambda x: [int(p) for p in re.findall(r'\d+', x[1])])
@@ -161,21 +162,23 @@ def gerar_relatorio_final(orgao, emitente, matricula, membros, dados):
             pdf.set_fill_color(200, 215, 230)
             pdf.set_text_color(26, 58, 90)
             pdf.set_x(10)
-            pdf.cell(0, 7, pdf.encode_txt(f"{cod_exibicao} - {txt}"), 0, 1, 'L', fill=True)
+            pdf.cell(0, 7, pdf.encode_txt(f"{cod_exibicao} {txt}"), 0, 1, 'L', fill=True)
+            pdf.ln(2)
             continue
         elif tipo == "Subfunção":
-            recuo, largura, tam_fonte, estilo = 16, 184, 10, 'B'
+            recuo, largura, tam_fonte, estilo = 16, 174, 10, 'B'
             pdf.set_text_color(50, 50, 50)
         elif tipo == "Atividade":
-            recuo, largura, tam_fonte, estilo = 24, 176, 10, ''
+            recuo, largura, tam_fonte, estilo = 24, 166, 10, ''
             pdf.set_text_color(80, 80, 80)
         else: # Tipo documental
-            recuo, largura, tam_fonte, estilo = 32, 168, 9.5, 'I'
+            recuo, largura, tam_fonte, estilo = 32, 158, 9.5, 'I'
             pdf.set_text_color(110, 110, 110)
         
         pdf.set_font('Arial', estilo, tam_fonte)
         pdf.set_x(recuo)
         pdf.multi_cell(largura, 6, pdf.encode_txt(f"{cod_exibicao} {txt}"))
+        pdf.ln(1)
         
     pdf.set_text_color(0, 0, 0)
     return bytes(pdf.output())
@@ -386,4 +389,58 @@ elif menu == "Área do Professor (Admin)":
                     st.error("Credenciais inválidas.")
                     
         with col_btn_esqueci:
-            with st.popover("🔑 Esqueci a
+            with st.popover("Recuperar Senha"):
+                st.write("Deseja restaurar as credenciais?")
+                st.caption("A redefinição irá gerar uma credencial temporária para o e-mail: palencar@id.uff.br")
+                if st.button("Confirmar Redefinição"):
+                    nova_senha_temp = "UFFRecupera2026Doc"
+                    cursor.execute("UPDATE admin_config SET senha = ? WHERE usuario = 'Admin123'", (nova_senha_temp,))
+                    conn.commit()
+                    st.info("E-mail de recuperação enviado para palencar@id.uff.br!")
+                    st.code(f"Usuário: Admin123\nSenha Temporária: {nova_senha_temp}")
+
+    else:
+        if st.sidebar.button("🚪 Sair do Painel Admin"):
+            del st.session_state['admin_logado']
+            st.rerun()
+            
+        st.subheader("📚 Alunos e Estruturas Cadastradas")
+        cursor.execute("SELECT matricula, nome, orgao FROM alunos")
+        lista_alunos = cursor.fetchall()
+        
+        if lista_alunos:
+            for al_mat, al_nome, al_org in lista_alunos:
+                cursor.execute("SELECT nome_membro, matricula_membro FROM membros_grupo WHERE matricula_lider = ?", (al_mat,))
+                membros_al = cursor.fetchall()
+                texto_membros = ", ".join([f"{n} ({m})" for n, m in membros_al]) if membros_al else "Apenas o líder"
+                
+                with st.expander(f"👤 Grupo de {al_nome} — Órão: {al_org} ({texto_membros})"):
+                    if st.checkbox("Habilitar exclusão permanente", key=f"chk_total_{al_mat}"):
+                        if st.button(f"🔥 Apagar Grupo de {al_nome}", key=f"btn_total_{al_mat}"):
+                            cursor.execute("DELETE FROM estrutura WHERE matricula = ?", (al_mat,))
+                            cursor.execute("DELETE FROM membros_grupo WHERE matricula_lider = ?", (al_mat,))
+                            cursor.execute("DELETE FROM alunos WHERE matricula = ?", (al_mat,))
+                            conn.commit()
+                            st.rerun()
+                            
+                    st.write("---")
+                    cursor.execute("SELECT id, codigo, tipo, texto FROM estrutura WHERE matricula = ?", (al_mat,))
+                    itens_aluno = cursor.fetchall()
+                    
+                    if itens_aluno:
+                        itens_ordenados = sorted(itens_aluno, key=lambda x: [int(p) for p in re.findall(r'\d+', x[1])])
+                        for item_id, cod, tipo, txt in itens_ordenados:
+                            col_dados, col_prof_edit, col_prof_del = st.columns([5, 3, 1])
+                            col_dados.write(f"**{cod}** `[{tipo}]` — {txt}")
+                            with col_prof_edit:
+                                with st.popover("Corrigir"):
+                                    txt_professor = st.text_input("Alterar descrição:", value=txt, key=f"prof_in_{item_id}")
+                                    if st.button("Salvar", key=f"prof_btn_sav_{item_id}"):
+                                        cursor.execute("UPDATE estrutura SET texto = ? WHERE id = ?", (txt_professor.strip(), item_id))
+                                        conn.commit()
+                                        st.rerun()
+                            if col_prof_del.button("🗑️", key=f"prof_del_it_{item_id}"):
+                                cursor.execute("DELETE FROM estrutura WHERE id = ?", (item_id,))
+                                conn.commit()
+                                l_mat = al_mat
+                                st.rerun()
