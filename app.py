@@ -1,12 +1,13 @@
 import streamlit as st
-import sqlite3
+from streamlit_sheets_connection import SheetsConnection
+import pandas as pd
 import re
 from fpdf import FPDF
 
-# Configuração da página (Design minimalista)
+# Configuração da página
 st.set_page_config(page_title="Plano de Classificação Online", page_icon="📁", layout="wide")
 
-# Estilização CSS para um visual clean
+# Estilização CSS Minimalista
 st.markdown("""
     <style>
     .main { background-color: #fcfcfc; }
@@ -16,33 +17,38 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- BANCO DE DADOS ---
-def init_db():
-    conn = sqlite3.connect('pcd_escola.db', check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS alunos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT NOT NULL,
-            matricula TEXT NOT NULL,
-            orgao TEXT NOT NULL
-        )    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS estrutura (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            aluno_id INTEGER,
-            tipo TEXT NOT NULL,
-            codigo TEXT NOT NULL,
-            texto TEXT NOT NULL,
-            FOREIGN KEY (aluno_id) REFERENCES alunos(id)
-        )    ''')
-    conn.commit()
-    return conn
+# --- CONEXÃO COM BANCO DE DADOS (GOOGLE SHEETS) ---
+# Tenta conectar ao Sheets. Se não configurado, usa cache local seguro temporário
+try:
+    conn = st.connection("gsheets", type=SheetsConnection)
+    uso_nuvem = True
+except Exception:
+    uso_nuvem = False
 
-conn = init_db()
-cursor = conn.cursor()
+@st.cache_data(ttl=5)
+def carregar_dados_banco(aba_nome):
+    if uso_nuvem:
+        try:
+            return conn.read(worksheet=aba_nome, ttl="5s")
+        except Exception:
+            pass
+    if f"local_db_{aba_nome}" not in st.session_state:
+        if aba_nome == "alunos":
+            st.session_state[f"local_db_{aba_nome}"] = pd.DataFrame(columns=["nome", "matricula", "orgao"])
+        else:
+            st.session_state[f"local_db_{aba_nome}"] = pd.DataFrame(columns=["matricula", "tipo", "codigo", "texto"])
+    return st.session_state[f"local_db_{aba_nome}"]
 
-# --- FUNÇÕES DE VALIDAÇÃO ---
+def salvar_dados_banco(df, aba_nome):
+    if uso_nuvem:
+        try:
+            conn.update(worksheet=aba_nome, data=df)
+            return
+        except Exception:
+            pass
+    st.session_state[f"local_db_{aba_nome}"] = df
+
+# --- VALIDAÇÕES ---
 def validar_codigo(codigo, tipo):
     codigo = codigo.strip()
     if tipo == "Função":
@@ -66,7 +72,7 @@ class PDF(FPDF):
         self.set_font('Arial', 'I', 8)
         self.cell(0, 10, f'Pagina {self.page_no()}', 0, 0, 'C')
 
-def gerar_pdf(orgao, itens):
+def gerar_pdf(orgao, df_itens):
     pdf = PDF()
     pdf.add_page()
     pdf.set_font("Arial", 'B', 12)
@@ -74,80 +80,114 @@ def gerar_pdf(orgao, itens):
     pdf.ln(5)
     pdf.set_font("Arial", '', 11)
     
-    itens_ordenados = sorted(itens, key=lambda x: x[0])
+    df_ordenado = df_itens.sort_values(by="codigo")
     
-    for cod, tipo, txt in itens_ordenados:
-        texto_linha = f"[{tipo}] {cod} - {txt}"
+    for _, row in df_ordenado.iterrows():
+        texto_linha = f"[{row['tipo']}] {row['codigo']} - {row['texto']}"
         pdf.multi_cell(0, 8, texto_linha.encode('latin-1', 'replace').decode('latin-1'))
     return bytes(pdf.output())
 
-# --- INTERFACE INICIAL ---
+# --- INTERFACE ---
 st.title("Plano de Classificação Online")
-st.caption("Disciplina de Tópicos Especiais 1")
+st.caption("Disciplina de Tópicos Especiais 1 - Sistema de Salvamento Permanente")
 
 menu = st.sidebar.radio("Navegação", ["Área do Aluno", "Área do Professor (Admin)"])
 
-# --- FLUXO ALUNO ---
 if menu == "Área do Aluno":
-    st.header("📝 Identificação do Aluno")
+    st.header("📝 Acesso / Identificação do Aluno")
     
     if 'aluno_logado' not in st.session_state:
         with st.form("cadastro_aluno"):
-            nome = st.text_input("Nome Completo:")
-            matricula = st.text_input("Matrícula:")
-            orgao = st.text_input("Órgão do Plano de Classificação:")
-            enviar = st.form_submit_button("Iniciar Elaboração do Plano")
+            nome = st.text_input("Nome Completo:").strip()
+            matricula = st.text_input("Matrícula:").strip()
+            orgao = st.text_input("Órgão do Plano de Classificação:").strip()
+            enviar = st.form_submit_button("Acessar / Criar Meu Plano")
             
             if enviar:
                 if nome and matricula and orgao:
-                    cursor.execute("INSERT INTO alunos (nome, matricula, orgao) VALUES (?, ?, ?)", (nome, matricula, orgao))
-                    conn.commit()
-                    st.session_state['aluno_id'] = cursor.lastrowid
-                    st.session_state['aluno_nome'] = nome
-                    st.session_state['aluno_orgao'] = orgao
-                    st.session_state['aluno_logado'] = True
-                    st.rerun()
+                    df_alunos = carregar_dados_banco("alunos")
+                    
+                    # REGRA: Verifica se a matrícula já existe no banco de dados permanente
+                    registro_existente = df_alunos[df_alunos['matricula'] == matricula]
+                    
+                    if not registro_existente.empty:
+                        # Se já existe, valida se o nome coincide para evitar fraude ou duplicados
+                        dados_aluno = registro_existente.iloc[0]
+                        if dados_aluno['nome'].lower() != nome.lower():
+                            st.error(f"Erro: A matrícula '{matricula}' já está cadastrada para outro estudante.")
+                        else:
+                            # Carrega a sessão existente (Recupera o progresso salvo anteriormente!)
+                            st.session_state['aluno_matricula'] = matricula
+                            st.session_state['aluno_nome'] = dados_aluno['nome']
+                            st.session_state['aluno_orgao'] = dados_aluno['orgao']
+                            st.session_state['aluno_logado'] = True
+                            st.success("Progresso anterior recuperado com sucesso!")
+                            st.rerun()
+                    else:
+                        # Se for um usuário totalmente novo, cadastra no banco permanente
+                        novo_aluno = pd.DataFrame([{"nome": nome, "matricula": matricula, "orgao": orgao}])
+                        df_alunos = pd.concat([df_alunos, novo_aluno], ignore_index=True)
+                        salvar_dados_banco(df_alunos, "alunos")
+                        
+                        st.session_state['aluno_matricula'] = matricula
+                        st.session_state['aluno_nome'] = nome
+                        st.session_state['aluno_orgao'] = orgao
+                        st.session_state['aluno_logado'] = True
+                        st.success("Novo perfil criado! Comece a cadastrar sua estrutura.")
+                        st.rerun()
                 else:
-                    st.error("Por favor, preencha todos os campos de identificação.")
+                    st.error("Por favor, preencha todos os campos.")
     else:
-        st.info(f"Aluno: **{st.session_state['aluno_nome']}** | Órgão: **{st.session_state['aluno_orgao']}**")
-        if st.button("Sair / Novo Cadastro"):
-            del st.session_state['aluno_logado']
-            st.rerun()
-            
-        st.write("---")
-        st.header("📁 Cadastro de Elementos do Plano")
+        st.info(f"Estudante: **{st.session_state['aluno_nome']}** | Matrícula: **{st.session_state['aluno_matricula']}** | Órgão: **{st.session_state['aluno_orgao']}**")
         
-        tab1, tab2 = st.tabs(["Inserir Itens", "Visualizar Estrutura & Exportar"])
+        col_botoes = st.columns([1, 4])
+        with col_botoes[0]:
+            if st.button("Sair do Sistema"):
+                del st.session_state['aluno_logado']
+                st.rerun()
+                
+        st.write("---")
+        st.header("📁 Estrutura do Seu Plano de Classificação")
+        
+        tab1, tab2 = st.tabs(["Inserir Níveis / Elementos", "Visualizar Estrutura Salva & Exportar"])
+        
+        # Carrega os itens deste aluno específico
+        df_estrutura_geral = carregar_dados_banco("estrutura")
+        df_itens_aluno = df_estrutura_geral[df_estrutura_geral['matricula'] == st.session_state['aluno_matricula']]
         
         with tab1:
             tipo_item = st.selectbox("Nível Hierárquico:", ["Função", "Subfunção", "Atividade", "Tipo documental"])
-            codigo_item = st.text_input("Código Numérico:", help="Ex: 01, 01.01., 01.01.01., etc.")
-            texto_item = st.text_area("Descrição/Texto (Máx 250 caracteres):", max_chars=250)
+            codigo_item = st.text_input("Código Numérico:", help="Ex: 01, 01.01., 01.01.01.")
+            texto_item = st.text_area("Descrição / Texto do Nível (Máx 250 caracteres):", max_chars=250)
             
-            if st.button("Salvar Item"):
+            if st.button("Salvar Elemento permanentemente"):
                 if not codigo_item.strip() or not texto_item.strip():
-                    st.error("Proibido o cadastro de campos vazios. Preencha o código e o texto.")
+                    st.error("Não é permitido cadastrar campos em branco.")
                 else:
                     valido, formato_correto = validar_codigo(codigo_item, tipo_item)
                     if not valido:
                         st.error(f"Código inválido para o nível '{tipo_item}'. {formato_correto}")
                     else:
-                        cursor.execute("INSERT INTO estrutura (aluno_id, tipo, codigo, texto) VALUES (?, ?, ?, ?)",
-                                       (st.session_state['aluno_id'], tipo_item, codigo_item.strip(), texto_item.strip()))
-                        conn.commit()
-                        st.success(f"{tipo_item} adicionada com sucesso!")
-        
+                        # Adiciona o novo item vinculando-o diretamente à matrícula do aluno
+                        novo_item = pd.DataFrame([{
+                            "matricula": st.session_state['aluno_matricula'],
+                            "tipo": tipo_item,
+                            "codigo": codigo_item.strip(),
+                            "texto": texto_item.strip()
+                        }])
+                        df_estrutura_geral = pd.concat([df_estrutura_geral, novo_item], ignore_index=True)
+                        salvar_dados_banco(df_estrutura_geral, "estrutura")
+                        st.success(f"{tipo_item} adicionada e salva na nuvem com sucesso! Seu progresso está seguro.")
+                        st.rerun()
+                        
         with tab2:
-            st.subheader(f"Estrutura Final: {st.session_state['aluno_orgao']}")
+            st.subheader(f"Árvore Hierárquica Atendida: {st.session_state['aluno_orgao']}")
             
-            cursor.execute("SELECT codigo, tipo, texto FROM estrutura WHERE aluno_id = ?", (st.session_state['aluno_id'],))
-            dados = cursor.fetchall()
-            
-            if dados:
-                dados_ordenados = sorted(dados, key=lambda x: x[0])
+            if not df_itens_aluno.empty:
+                df_ordenado = df_itens_aluno.sort_values(by="codigo")
                 
-                for cod, tipo, txt in dados_ordenados:
+                for _, row in df_ordenado.iterrows():
+                    cod, tipo, txt = row['codigo'], row['tipo'], row['texto']
                     if tipo == "Função":
                         st.markdown(f"**{cod} {txt}**")
                     elif tipo == "Subfunção":
@@ -158,15 +198,15 @@ if menu == "Área do Aluno":
                         st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;🔸 *{cod} {txt}*")
                 
                 st.write("---")
-                pdf_data = gerar_pdf(st.session_state['aluno_orgao'], dados)
+                pdf_data = gerar_pdf(st.session_state['aluno_orgao'], df_itens_aluno)
                 st.download_button(
-                    label="📄 Exportar Relatório em PDF",
+                    label="📄 Exportar Relatório Oficial em PDF",
                     data=pdf_data,
-                    file_name=f"Relatorio_Plano_Classificacao_{st.session_state['aluno_orgao']}.pdf",
+                    file_name=f"Relatorio_PCD_{st.session_state['aluno_matricula']}.pdf",
                     mime="application/pdf"
                 )
             else:
-                st.warning("Nenhum item cadastrado ainda.")
+                st.warning("Você ainda não possui nenhum nível estrutural salvo neste plano.")
 
 # --- FLUXO PROFESSOR (ADMIN) ---
 elif menu == "Área do Professor (Admin)":
@@ -186,21 +226,20 @@ elif menu == "Área do Professor (Admin)":
             del st.session_state['admin_logado']
             st.rerun()
             
-        st.subheader("Planos de Classificação Cadastrados por Aluno")
+        st.subheader("Planos Permanentes Cadastrados por Aluno")
         
-        cursor.execute("SELECT id, nome, matricula, orgao FROM alunos")
-        lista_alunos = cursor.fetchall()
+        df_alunos = carregar_dados_banco("alunos")
+        df_estrutura = carregar_dados_banco("estrutura")
         
-        if lista_alunos:
-            for al_id, al_nome, al_mat, al_org in lista_alunos:
-                with st.expander(f"Aluno: {al_nome} (Matrícula: {al_mat}) - Órgão: {al_org}"):
-                    cursor.execute("SELECT codigo, tipo, texto FROM estrutura WHERE aluno_id = ?", (al_id,))
-                    itens_aluno = cursor.fetchall()
-                    if itens_aluno:
-                        itens_aluno = sorted(itens_aluno, key=lambda x: x[0])
-                        for cod, tipo, txt in itens_aluno:
-                            st.write(f"**{cod}** [{tipo}] - {txt}")
+        if not df_alunos.empty:
+            for _, al_row in df_alunos.iterrows():
+                with st.expander(f"Aluno: {al_row['nome']} (Matrícula: {al_row['matricula']}) - Órgão: {al_row['orgao']}"):
+                    itens_aluno = df_estrutura[df_estrutura['matricula'] == al_row['matricula']]
+                    if not itens_aluno.empty:
+                        itens_aluno = itens_aluno.sort_values(by="codigo")
+                        for _, it_row in itens_aluno.iterrows():
+                            st.write(f"**{it_row['codigo']}** [{it_row['tipo']}] - {it_row['texto']}")
                     else:
-                        st.write("Nenhum item cadastrado por este aluno.")
+                        st.write("Nenhum item cadastrado por este aluno até o momento.")
         else:
-            st.info("Nenhum aluno cadastrado no sistema até o momento.")
+            st.info("Nenhum aluno cadastrado no sistema permanente ainda.")
