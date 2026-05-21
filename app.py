@@ -65,6 +65,8 @@ def validar_codigo(codigo, tipo):
     return False, ""
 
 def buscar_nome_elemento(matricula, codigo_prefixo):
+    if not matricula:
+        return "Usuário não identificado"
     cursor.execute("SELECT texto FROM estrutura WHERE matricula = ? AND (codigo = ? OR codigo = ?)", 
                    (matricula, codigo_prefixo, f"{codigo_prefixo}."))
     resultado = cursor.fetchone()
@@ -101,7 +103,6 @@ def gerar_pdf(orgao, itens):
             indent = "            "
             
         texto_linha = f"{indent}[{tipo}] {cod} - {txt}"
-        # Usando multi_cell informando largura máxima explícita para evitar o erro de estouro horizontal
         pdf.multi_cell(190, 8, texto_linha.encode('latin-1', 'replace').decode('latin-1'))
     return bytes(pdf.output())
 
@@ -118,7 +119,8 @@ if menu == "Área do Aluno":
         opcao_acesso = st.radio(
             "Selecione uma opção:",
             ["Primeiro Acesso (Criar Novo Perfil)", "Já Estou Cadastrado (Recuperar Progresso)"],
-            horizontal=True
+            horizontal=True,
+            key="opcao_acesso_abas"
         )
         
         with st.form("cadastro_aluno"):
@@ -143,3 +145,21 @@ if menu == "Área do Aluno":
                         if aluno_existente:
                             nome_salvo = " ".join(aluno_existente[0].strip().split()).lower()
                             nome_digitado = " ".join(nome.strip().split()).lower()
+                            
+                            if nome_salvo != nome_digitado:
+                                st.error("Nome incorreto para a matrícula informada.")
+                            else:
+                                st.session_state['aluno_matricula'] = matricula
+                                st.session_state['aluno_nome'] = aluno_existente[0]
+                                st.session_state['aluno_orgao'] = aluno_existente[1]
+                                st.session_state['aluno_logado'] = True
+                                st.success("Bem-vindo de volta! Seu progresso foi restaurado.")
+                                st.rerun()
+                        else:
+                            st.error(f"A matrícula '{matricula}' não foi encontrada.")
+                    
+                    else: 
+                        if not orgao:
+                            st.error("Por favor, preencha o campo 'Órgão do Plano de Classificação'.")
+                        elif aluno_existente:
+                            st.error(f"A matrícula '{matricula}' já está cadastrada no
