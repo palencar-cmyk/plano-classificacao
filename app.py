@@ -5,6 +5,7 @@ import re
 import time
 from datetime import datetime
 from fpdf import FPDF
+import extra_streamlit_components as stx
 
 # Configuração da página
 st.set_page_config(page_title="PCD Online - UFF", page_icon="📁", layout="wide")
@@ -20,8 +21,15 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- BANCO DE DADOS PERSISTENTE ---
-DB_PATH = "/data/pcd_data_permanente.db" if os.path.exists("/data") else "pcd_data_permanente.db"
+# --- GERENCIADOR DE COOKIES / LOCAL STORAGE ---
+@st.cache_resource
+def obter_gerenciador_cookies():
+    return stx.CookieManager()
+
+cookie_manager = obter_gerenciador_cookies()
+
+# --- BANCO DE DADOS PERSISTENTE LOCAL ---
+DB_PATH = "pcd_data_permanente.db"
 
 def init_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -31,18 +39,32 @@ def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS estrutura (id INTEGER PRIMARY KEY AUTOINCREMENT, matricula TEXT, tipo TEXT NOT NULL, codigo TEXT NOT NULL, texto TEXT NOT NULL, UNIQUE(matricula, codigo), FOREIGN KEY (matricula) REFERENCES alunos(matricula))''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS admin_config (usuario TEXT PRIMARY KEY, senha TEXT NOT NULL)''')
     
-    # Credencial padrão inicial
-    cursor.execute("INSERT OR IGNORE INTO admin_config VALUES ('Admin123', '123Admin')")
+    # NOVAS CREDENCIAIS SOLICITADAS: admin0 / 0admin
+    cursor.execute("INSERT OR IGNORE INTO admin_config VALUES ('admin0', '0admin')")
     conn.commit()
     return conn
 
 conn = init_db()
 cursor = conn.cursor()
 
-# --- DEFINIÇÃO DA CHAVE MESTRA DE RECUPERAÇÃO ---
+# --- TENTATIVA DE LOGIN AUTOMÁTICO VIA COOKIE ---
+if 'aluno_logado' not in st.session_state:
+    matricula_salva = cookie_manager.get(cookie="uff_pcd_matricula")
+    if matricula_salva:
+        cursor.execute("SELECT nome, orgao FROM alunos WHERE matricula = ?", (str(matricula_salva).strip(),))
+        aluno_recuperado = cursor.fetchone()
+        if aluno_recuperado:
+            st.session_state.update({
+                'aluno_matricula': str(matricula_salva).strip(),
+                'aluno_nome': aluno_recuperado[0],
+                'aluno_orgao': aluno_recuperado[1],
+                'aluno_logado': True
+            })
+
+# --- CHAVE MESTRA DE RECUPERAÇÃO ---
 CHAVE_MESTRA_RECUPERACAO = "UFF#Admin#Seguro#2026"
 
-# --- INICIALIZAÇÃO DE CONTROLE ANTI-SPAM ---
+# --- CONTROLE ANTI-SPAM ---
 if 'last_submit_time' not in st.session_state:
     st.session_state['last_submit_time'] = 0.0
 if 'last_submit_text' not in st.session_state:
@@ -50,7 +72,6 @@ if 'last_submit_text' not in st.session_state:
 
 # --- FUNÇÕES DE AUXÍLIO E GERAÇÃO DE CÓDIGOS AUTOMÁTICOS ---
 def obter_proximo_codigo(matricula, tipo, pai_codigo=None):
-    """Gera códigos automáticos tratando corretamente os pontos finais fixos da árvore de classificação."""
     if tipo == "Função":
         cursor.execute("SELECT codigo FROM estrutura WHERE matricula = ? AND tipo = 'Função'", (matricula,))
         codigos = []
@@ -63,7 +84,6 @@ def obter_proximo_codigo(matricula, tipo, pai_codigo=None):
         
     elif tipo == "Subfunção" and pai_codigo:
         pai_limpo = pai_codigo.rstrip('.')
-        # Busca filhos diretos vinculados àquela matrícula específica
         cursor.execute("SELECT codigo FROM estrutura WHERE matricula = ? AND tipo = 'Subfunção' AND codigo LIKE ?", 
                        (matricula, f"{pai_limpo}.%"))
         sufixos = []
@@ -102,7 +122,6 @@ def obter_proximo_codigo(matricula, tipo, pai_codigo=None):
         return f"{pai_limpo}.{proximo:02d}."
     return ""
 
-# --- GERADOR DE PDF ---
 class CustomPCDPDF(FPDF):
     def __init__(self, orgao, emitente, membros):
         super().__init__()
@@ -135,7 +154,6 @@ class CustomPCDPDF(FPDF):
         return str(texto).replace('–', '-').replace('—', '-').encode('latin-1', 'ignore').decode('latin-1')
 
 def ordenar_codigos_arquivisticos(item):
-    """Função chave para ordenar corretamente strings de código compostas como 01.02.03.04."""
     partes = re.findall(r'\d+', item[1])
     return [int(p) for p in partes]
 
@@ -150,7 +168,6 @@ def gerar_relatorio_final(orgao, emitente, matricula, membros, dados):
     pdf.cell(0, 8, pdf.encode_txt(f"ORGAO PRODUTOR: {orgao.upper()}"), 0, 1, 'C')
     pdf.ln(5)
     
-    # Componentes
     pdf.set_font('Arial', 'B', 11)
     pdf.set_fill_color(230, 235, 240)
     pdf.cell(0, 8, " COMPONENTES DO GRUPO", 0, 1, 'L', fill=True)
@@ -186,7 +203,7 @@ def gerar_relatorio_final(orgao, emitente, matricula, membros, dados):
         elif tipo == "Atividade":
             recuo, largura, tam_fonte, estilo = 24, 166, 10, ''
             pdf.set_text_color(80, 80, 80)
-        else: # Tipo documental
+        else:
             recuo, largura, tam_fonte, estilo = 32, 158, 9.5, 'I'
             pdf.set_text_color(110, 110, 110)
         
@@ -202,9 +219,6 @@ def gerar_relatorio_final(orgao, emitente, matricula, membros, dados):
 st.title("Plano de Classificação Online - UFF")
 menu = st.sidebar.radio("Navegação", ["Área do Aluno", "Área do Professor (Admin)"])
 
-# ==========================================
-#              ÁREA DO ALUNO
-# ==========================================
 if menu == "Área do Aluno":
     st.header("📝 Acesso do Estudante")
     
@@ -227,6 +241,7 @@ if menu == "Área do Aluno":
                 
                 if opcao_acesso == "Já Estou Cadastrado":
                     if aluno_existente:
+                        cookie_manager.set(key="uff_pcd_matricula", value=matricula_input, max_age=2592000)
                         st.session_state.update({'aluno_matricula': matricula_input, 'aluno_nome': aluno_existente[0], 'aluno_orgao': aluno_existente[1], 'aluno_logado': True})
                         st.success("Sucesso! Carregando dados...")
                         st.rerun()
@@ -240,6 +255,7 @@ if menu == "Área do Aluno":
                     else:
                         cursor.execute("INSERT INTO alunos VALUES (?, ?, ?)", (matricula_input, nome_input, orgao_input))
                         conn.commit()
+                        cookie_manager.set(key="uff_pcd_matricula", value=matricula_input, max_age=2592000)
                         st.session_state.update({'aluno_matricula': matricula_input, 'aluno_nome': nome_input, 'aluno_orgao': orgao_input, 'aluno_logado': True})
                         st.success("Perfil gerado com sucesso!")
                         st.rerun()
@@ -247,6 +263,7 @@ if menu == "Área do Aluno":
     else:
         st.info(f"Estudante Responsável: **{st.session_state['aluno_nome']}** | Matrícula: **{st.session_state['aluno_matricula']}** | Órgão: **{st.session_state['aluno_orgao']}**")
         if st.sidebar.button("🚪 Sair / Mudar de Conta"):
+            cookie_manager.delete(key="uff_pcd_matricula")
             del st.session_state['aluno_logado']
             st.rerun()
             
@@ -340,7 +357,7 @@ if menu == "Área do Aluno":
                         texto_limpo = texto_item.strip()
                         
                         if tempo_decorrido < 3.0 and texto_limpo == st.session_state['last_submit_text']:
-                            st.error("⛔ Item repetido detectado! Aguarde 3 segundos para reenviar o mesmo texto.")
+                            st.error("⛔ Item repetido detectado! Aguarde 3 segundos.")
                         else:
                             st.session_state['last_submit_time'] = agora
                             st.session_state['last_submit_text'] = texto_limpo
@@ -357,7 +374,7 @@ if menu == "Área do Aluno":
                 st.caption("Preencha o campo de texto para habilitar o salvamento.")
 
         with tab3:
-            st.subheader(f"Estrutura Atual: {st.session_state['aluno_orgao']}")
+            st.subheader(f"Estrutura Atual")
             cursor.execute("SELECT id, codigo, tipo, texto FROM estrutura WHERE matricula = ?", (mat_atual,))
             dados = cursor.fetchall()
             
@@ -401,9 +418,6 @@ if menu == "Área do Aluno":
                 except Exception as e:
                     st.error(f"Erro ao compilar o PDF: {e}")
 
-# ==========================================
-#         ÁREA DO PROFESSOR (ADMIN)
-# ==========================================
 elif menu == "Área do Professor (Admin)":
     st.header("🔒 Painel Administrativo do Professor")
     
@@ -427,8 +441,6 @@ elif menu == "Área do Professor (Admin)":
         with col_btn_esqueci:
             with st.popover("Recuperar Senha"):
                 st.subheader("🔑 Recuperação via Chave Mestra")
-                st.write("Insira a chave secreta de segurança institucional para redefinir as credenciais:")
-                
                 input_chave_mestra = st.text_input("Chave Mestra de Segurança:", type="password", key="input_master_key")
                 nova_senha_emergencia = st.text_input("Defina sua Nova Senha do Painel:", type="password", key="input_new_pass_emergency")
                 
@@ -437,19 +449,19 @@ elif menu == "Área do Professor (Admin)":
                         if not nova_senha_emergencia.strip():
                             st.error("A nova senha não pode estar em branco.")
                         else:
-                            cursor.execute("UPDATE admin_config SET senha = ? WHERE usuario = 'Admin123'", (nova_senha_emergencia.strip(),))
+                            cursor.execute("UPDATE admin_config SET senha = ? WHERE usuario = 'admin0'", (nova_senha_emergencia.strip(),))
                             conn.commit()
-                            st.success("✅ Autenticado! Senha redefinida. Faça login.")
+                            st.success("✅ Autenticado! Senha redefinida.")
                             st.rerun()
                     else:
-                        st.error("❌ Chave Mestra inválida. Acesso bloqueado.")
+                        st.error("❌ Chave Mestra inválida.")
 
     else:
         if st.sidebar.button("🚪 Sair do Painel Admin"):
             del st.session_state['admin_logado']
             st.rerun()
             
-        tab_prof1, tab_prof2 = st.tabs(["📚 Alunos e Estruturas Cadastradas", "🔒 Configurações de Segurança"])
+        tab_prof1, tab_prof2, tab_prof3 = st.tabs(["📚 Alunos Cadastrados", "🚨 Ferramenta de Recuperação", "🔒 Configurações"])
         
         with tab_prof1:
             cursor.execute("SELECT matricula, nome, orgao FROM alunos")
@@ -493,10 +505,8 @@ elif menu == "Área do Professor (Admin)":
             else:
                 st.info("Nenhum plano ou aluno cadastrado até o momento.")
                 
-        with tab_prof2:
+        with tab_prof3:
             st.subheader("Alterar Senha do Administrador")
-            st.write("Atualize os dados de acesso para remover a credencial inicial.")
-            
             with st.form("form_senha_admin", clear_on_submit=True):
                 nova_senha_def = st.text_input("Digite a Nova Senha Forte:", type="password")
                 confirma_senha_def = st.text_input("Confirme a Nova Senha Forte:", type="password")
@@ -507,6 +517,51 @@ elif menu == "Área do Professor (Admin)":
                     elif nova_senha_def != confirma_senha_def:
                         st.error("As senhas inseridas não coincidem.")
                     else:
-                        cursor.execute("UPDATE admin_config SET senha = ? WHERE usuario = 'Admin123'", (nova_senha_def.strip(),))
+                        cursor.execute("UPDATE admin_config SET senha = ? WHERE usuario = 'admin0'", (nova_senha_def.strip(),))
                         conn.commit()
                         st.success("Senha alterada com sucesso!")
+
+        with tab_prof2:
+            st.subheader("⚡ Painel de Restauração de Emergência")
+            st.markdown("""
+            Esta ferramenta serve como uma **Planilha-Mãe temporária embutida**. Se o servidor sofrer um reset geral e a estrutura de dados sumir,
+            você pode reinjetar instantaneamente uma base completa para testes ou recuperação dos alunos de forma imediata.
+            """)
+            
+            # Form de entrada para carregar dados recuperados
+            with st.form("form_recuperacao_manual"):
+                mat_recup = st.text_input("Matrícula do Líder do Aluno a recuperar:")
+                nome_recup = st.text_input("Nome Completo do Líder:")
+                orgao_recup = st.text_input("Nome do Órgão Produtor:")
+                
+                st.write("---")
+                st.caption("Aperte o botão abaixo para injetar o perfil do aluno e a estrutura padrão de PCD (Funções e Subfunções acadêmicas) de forma automática.")
+                
+                if st.form_submit_button("🔥 Executar: Reinserir dados temporários"):
+                    if not mat_recup or not nome_recup or not orgao_recup:
+                        st.error("Preencha todos os campos do aluno para restaurar.")
+                    else:
+                        # Injeta o perfil do Aluno
+                        cursor.execute("INSERT OR IGNORE INTO alunos VALUES (?, ?, ?)", (mat_recup.strip(), nome_recup.strip(), orgao_recup.strip()))
+                        
+                        # Injeta uma Planilha-Mãe Padrão de Estrutura Arquivística como Backup de Emergência
+                        dados_backup_padrao = [
+                            ("Função", "01.", "GESTÃO ACADÊMICA"),
+                            ("Subfunção", "01.01.", "Matrícula e Ingresso de Alunos"),
+                            ("Atividade", "01.01.01.", "Inscrição em disciplinas de graduação"),
+                            ("Tipo documental", "01.01.01.01.", "Requerimento de inscrição"),
+                            ("Função", "02.", "ADMINISTRAÇÃO E RECURSOS"),
+                            ("Subfunção", "02.01.", "Gerenciamento de Recursos Humanos")
+                        ]
+                        
+                        sucesso_itens = 0
+                        for tipo, cod, txt in dados_backup_padrao:
+                            try:
+                                cursor.execute("INSERT OR IGNORE INTO estrutura (matricula, tipo, codigo, texto) VALUES (?, ?, ?, ?)",
+                                               (mat_recup.strip(), tipo, cod, txt))
+                                sucesso_itens += 1
+                            except Exception:
+                                pass
+                                
+                        conn.commit()
+                        st.success(f"🎉 Pronto! O perfil de {nome_recup} foi reativado e {sucesso_itens} itens estruturais foram reinseridos na base local com sucesso!")
