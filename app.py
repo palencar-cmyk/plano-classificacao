@@ -22,11 +22,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- GERENCIADOR DE COOKIES / LOCAL STORAGE ---
-# Removido o @st.cache_resource para evitar o CachedWidgetWarning.
-# Em vez disso, passamos uma key fixa para o componente gerenciar sua própria identidade.
 cookie_manager = stx.CookieManager(key="cookie_manager_global")
 
-# Pequeno intervalo necessário para sincronização do iframe com o navegador
+# Sincronização do iframe com o navegador
 time.sleep(0.2)
 
 # --- BANCO DE DADOS PERSISTENTE LOCAL ---
@@ -136,13 +134,13 @@ class CustomPCDPDF(FPDF):
 
     def header(self):
         self.set_font('Arial', 'B', 10)
-        self.cell(0, 5, 'UNIVERSIDADE FEDERAL FLUMINENSE', 0, 1, 'C')
-        self.cell(0, 5, 'INSTITUTO DE ARTE E COMUNICAÇÃO SOCIAL', 0, 1, 'C')
-        self.cell(0, 5, 'DEPARTAMENTO DE CIÊNCIA DA INFORMAÇÃO', 0, 1, 'C')
-        self.cell(0, 5, 'CURSO DE GRADUAÇÃO EM ARQUIVOLOGIA', 0, 1, 'C')
+        self.cell(0, 5, self.encode_txt('UNIVERSIDADE FEDERAL FLUMINENSE'), 0, 1, 'C')
+        self.cell(0, 5, self.encode_txt('INSTITUTO DE ARTE E COMUNICAÇÃO SOCIAL'), 0, 1, 'C')
+        self.cell(0, 5, self.encode_txt('DEPARTAMENTO DE CIÊNCIA DA INFORMAÇÃO'), 0, 1, 'C')
+        self.cell(0, 5, self.encode_txt('CURSO DE GRADUAÇÃO EM ARQUIVOLOGIA'), 0, 1, 'C')
         self.set_font('Arial', '', 10)
-        self.cell(0, 5, 'DISCIPLINA DE TOPICOS ESPECIAIS 1', 0, 1, 'C')
-        self.cell(0, 5, 'PROFESSORES: CLARISSA SCHMIDT E PAULO ALENCAR', 0, 1, 'C')
+        self.cell(0, 5, self.encode_txt('DISCIPLINA DE TÓPICOS ESPECIAIS 1'), 0, 1, 'C')
+        self.cell(0, 5, self.encode_txt('PROFESSORES: CLARISSA SCHMIDT E PAULO ALENCAR'), 0, 1, 'C')
         self.ln(10)
         self.line(10, 42, 200, 42)
 
@@ -155,7 +153,9 @@ class CustomPCDPDF(FPDF):
 
     def encode_txt(self, texto):
         if not texto: return ""
-        return str(texto).replace('–', '-').replace('—', '-').encode('latin-1', 'ignore').decode('latin-1')
+        # Remove travessões complexos e força decodificação segura compatível com o PDF Arial Standard
+        texto_limpo = str(texto).replace('–', '-').replace('—', '-')
+        return texto_limpo.encode('latin-1', 'ignore').decode('latin-1')
 
 def ordenar_codigos_arquivisticos(item):
     partes = re.findall(r'\d+', item[1])
@@ -167,22 +167,22 @@ def gerar_relatorio_final(orgao, emitente, matricula, membros, dados):
     pdf.add_page()
     
     pdf.set_font('Arial', 'B', 14)
-    pdf.cell(0, 15, pdf.encode_txt("PLANO DE CLASSIFICACAO DE DOCUMENTOS"), 0, 1, 'C')
+    pdf.cell(0, 15, pdf.encode_txt("PLANO DE CLASSIFICAÇÃO DE DOCUMENTOS"), 0, 1, 'C')
     pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 8, pdf.encode_txt(f"ORGAO PRODUTOR: {orgao.upper()}"), 0, 1, 'C')
+    pdf.cell(0, 8, pdf.encode_txt(f"ÓRGÃO PRODUTOR: {orgao.upper()}"), 0, 1, 'C')
     pdf.ln(5)
     
     pdf.set_font('Arial', 'B', 11)
     pdf.set_fill_color(230, 235, 240)
-    pdf.cell(0, 8, " COMPONENTES DO GRUPO", 0, 1, 'L', fill=True)
+    pdf.cell(0, 8, pdf.encode_txt(" COMPONENTES DO GRUPO"), 0, 1, 'L', fill=True)
     pdf.set_font('Arial', '', 10)
-    pdf.cell(0, 6, pdf.encode_txt(f"Lider / Responsavel: {emitente} ({matricula})"), 0, 1, 'L')
+    pdf.cell(0, 6, pdf.encode_txt(f"Líder / Responsável: {emitente} ({matricula})"), 0, 1, 'L')
     for m_nome, m_mat in membros:
         pdf.cell(0, 6, pdf.encode_txt(f"Integrante: {m_nome} ({m_mat})"), 0, 1, 'L')
     pdf.ln(8)
 
     pdf.set_font('Arial', 'B', 11)
-    pdf.cell(0, 8, " ESTRUTURA ARQUIVISTICA DO PLANO", 0, 1, 'L', fill=True)
+    pdf.cell(0, 8, pdf.encode_txt(" ESTRUTURA ARQUIVÍSTICA DO PLANO"), 0, 1, 'L', fill=True)
     pdf.ln(4)
     
     dados_ordenados = sorted(dados, key=ordenar_codigos_arquivisticos)
@@ -217,7 +217,7 @@ def gerar_relatorio_final(orgao, emitente, matricula, membros, dados):
         pdf.ln(1)
         
     pdf.set_text_color(0, 0, 0)
-    return bytes(pdf.output())
+    return pdf.output(dest='S').encode('latin-1')
 
 # --- INTERFACE PRINCIPAL ---
 st.title("Plano de Classificação Online - UFF")
