@@ -22,7 +22,15 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- GERENCIADOR DE COOKIES / LOCAL STORAGE ---
-cookie_manager = stx.CookieManager()
+# Usamos cache para garantir que o componente inicialize apenas uma vez de forma estável
+@st.cache_resource
+def get_cookie_manager():
+    return stx.CookieManager()
+
+cookie_manager = get_cookie_manager()
+
+# Pausa crucial para dar tempo ao iframe do Streamlit se conectar com o navegador antes do script rodar
+time.sleep(0.2)
 
 # --- BANCO DE DADOS PERSISTENTE LOCAL ---
 DB_PATH = "pcd_data_permanente.db"
@@ -45,17 +53,20 @@ cursor = conn.cursor()
 
 # --- TENTATIVA DE LOGIN AUTOMÁTICO VIA COOKIE ---
 if 'aluno_logado' not in st.session_state:
-    matricula_salva = cookie_manager.get(cookie="uff_pcd_matricula")
-    if matricula_salva:
-        cursor.execute("SELECT nome, orgao FROM alunos WHERE matricula = ?", (str(matricula_salva).strip(),))
-        aluno_recuperado = cursor.fetchone()
-        if aluno_recuperado:
-            st.session_state.update({
-                'aluno_matricula': str(matricula_salva).strip(),
-                'aluno_nome': aluno_recuperado[0],
-                'aluno_orgao': aluno_recuperado[1],
-                'aluno_logado': True
-            })
+    try:
+        matricula_salva = cookie_manager.get(cookie="uff_pcd_matricula")
+        if matricula_salva:
+            cursor.execute("SELECT nome, orgao FROM alunos WHERE matricula = ?", (str(matricula_salva).strip(),))
+            aluno_recuperado = cursor.fetchone()
+            if aluno_recuperado:
+                st.session_state.update({
+                    'aluno_matricula': str(matricula_salva).strip(),
+                    'aluno_nome': aluno_recuperado[0],
+                    'aluno_orgao': aluno_recuperado[1],
+                    'aluno_logado': True
+                })
+    except Exception:
+        pass
 
 # --- CHAVE MESTRA DE RECUPERAÇÃO ---
 CHAVE_MESTRA_RECUPERACAO = "UFF#Admin#Seguro#2026"
@@ -237,8 +248,10 @@ if menu == "Área do Aluno":
                 
                 if opcao_acesso == "Já Estou Cadastrado":
                     if aluno_existente:
-                        # AJUSTE DEFINITIVO: cookie identificador E key de renderização do componente
-                        cookie_manager.set(cookie="uff_pcd_matricula", value=matricula_input, max_age=2592000, key="set_cookie_login")
+                        try:
+                            cookie_manager.set(cookie="uff_pcd_matricula", value=matricula_input, max_age=2592000, key="set_cookie_login_final")
+                        except Exception:
+                            pass
                         st.session_state.update({'aluno_matricula': matricula_input, 'aluno_nome': aluno_existente[0], 'aluno_orgao': aluno_existente[1], 'aluno_logado': True})
                         st.success("Sucesso! Carregando dados...")
                         st.rerun()
@@ -252,8 +265,10 @@ if menu == "Área do Aluno":
                     else:
                         cursor.execute("INSERT INTO alunos VALUES (?, ?, ?)", (matricula_input, nome_input, orgao_input))
                         conn.commit()
-                        # AJUSTE DEFINITIVO: cookie identificador E key de renderização do componente
-                        cookie_manager.set(cookie="uff_pcd_matricula", value=matricula_input, max_age=2592000, key="set_cookie_cadastro")
+                        try:
+                            cookie_manager.set(cookie="uff_pcd_matricula", value=matricula_input, max_age=2592000, key="set_cookie_cadastro_final")
+                        except Exception:
+                            pass
                         st.session_state.update({'aluno_matricula': matricula_input, 'aluno_nome': nome_input, 'aluno_orgao': orgao_input, 'aluno_logado': True})
                         st.success("Perfil gerado com sucesso!")
                         st.rerun()
@@ -261,8 +276,10 @@ if menu == "Área do Aluno":
     else:
         st.info(f"Estudante Responsável: **{st.session_state['aluno_nome']}** | Matrícula: **{st.session_state['aluno_matricula']}** | Órgão: **{st.session_state['aluno_orgao']}**")
         if st.sidebar.button("🚪 Sair / Mudar de Conta"):
-            # AJUSTE DEFINITIVO: cookie identificador E key de renderização do componente
-            cookie_manager.delete(cookie="uff_pcd_matricula", key="delete_cookie_logout")
+            try:
+                cookie_manager.delete(cookie="uff_pcd_matricula", key="delete_cookie_logout_final")
+            except Exception:
+                pass
             del st.session_state['aluno_logado']
             st.rerun()
             
@@ -441,7 +458,7 @@ elif menu == "Área do Professor (Admin)":
             with st.popover("Recuperar Senha"):
                 st.subheader("🔑 Recuperação via Chave Mestra")
                 input_chave_mestra = st.text_input("Chave Mestra de Segurança:", type="password", key="input_master_key")
-                nova_senha_emergencia = st.text_input("Defina sua Nova Senha do Painel:", type="password", key="input_new_pass_emergency")
+                nova_senha_emergencia = st.text_input("Defina sua Nova Senha do Panel:", type="password", key="input_new_pass_emergency")
                 
                 if st.button("Confirmar Alteração"):
                     if input_chave_mestra == CHAVE_MESTRA_RECUPERACAO:
@@ -561,3 +578,5 @@ elif menu == "Área do Professor (Admin)":
                                 
                         conn.commit()
                         st.success(f"🎉 Pronto! O perfil de {nome_recup} foi reativado e {sucesso_itens} itens estruturais foram reinseridos na base local com sucesso!")
+
+```
