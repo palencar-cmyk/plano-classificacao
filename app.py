@@ -22,14 +22,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- GERENCIADOR DE COOKIES / LOCAL STORAGE ---
-# Usamos cache para garantir que o componente inicialize apenas uma vez de forma estável
-@st.cache_resource
-def get_cookie_manager():
-    return stx.CookieManager()
+# Removido o @st.cache_resource para evitar o CachedWidgetWarning.
+# Em vez disso, passamos uma key fixa para o componente gerenciar sua própria identidade.
+cookie_manager = stx.CookieManager(key="cookie_manager_global")
 
-cookie_manager = get_cookie_manager()
-
-# Pausa crucial para dar tempo ao iframe do Streamlit se conectar com o navegador antes do script rodar
+# Pequeno intervalo necessário para sincronização do iframe com o navegador
 time.sleep(0.2)
 
 # --- BANCO DE DADOS PERSISTENTE LOCAL ---
@@ -458,7 +455,7 @@ elif menu == "Área do Professor (Admin)":
             with st.popover("Recuperar Senha"):
                 st.subheader("🔑 Recuperação via Chave Mestra")
                 input_chave_mestra = st.text_input("Chave Mestra de Segurança:", type="password", key="input_master_key")
-                nova_senha_emergencia = st.text_input("Defina sua Nova Senha do Panel:", type="password", key="input_new_pass_emergency")
+                nova_senha_emergencia = st.text_input("Defina sua Nova Senha do Painel:", type="password", key="input_new_pass_emergency")
                 
                 if st.button("Confirmar Alteração"):
                     if input_chave_mestra == CHAVE_MESTRA_RECUPERACAO:
