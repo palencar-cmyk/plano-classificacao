@@ -22,7 +22,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- GERENCIADOR DE COOKIES / LOCAL STORAGE ---
-# Inicialização direta para evitar o conflito do CachedWidgetWarning
 cookie_manager = stx.CookieManager()
 
 # --- BANCO DE DADOS PERSISTENTE LOCAL ---
@@ -238,7 +237,7 @@ if menu == "Área do Aluno":
                 
                 if opcao_acesso == "Já Estou Cadastrado":
                     if aluno_existente:
-                        cookie_manager.set(key="uff_pcd_matricula", value=matricula_input, max_age=2592000)
+                        cookie_manager.set(cookie="uff_pcd_matricula", value=matricula_input, max_age=2592000)
                         st.session_state.update({'aluno_matricula': matricula_input, 'aluno_nome': aluno_existente[0], 'aluno_orgao': aluno_existente[1], 'aluno_logado': True})
                         st.success("Sucesso! Carregando dados...")
                         st.rerun()
@@ -252,7 +251,7 @@ if menu == "Área do Aluno":
                     else:
                         cursor.execute("INSERT INTO alunos VALUES (?, ?, ?)", (matricula_input, nome_input, orgao_input))
                         conn.commit()
-                        cookie_manager.set(key="uff_pcd_matricula", value=matricula_input, max_age=2592000)
+                        cookie_manager.set(cookie="uff_pcd_matricula", value=matricula_input, max_age=2592000)
                         st.session_state.update({'aluno_matricula': matricula_input, 'aluno_nome': nome_input, 'aluno_orgao': orgao_input, 'aluno_logado': True})
                         st.success("Perfil gerado com sucesso!")
                         st.rerun()
@@ -260,7 +259,7 @@ if menu == "Área do Aluno":
     else:
         st.info(f"Estudante Responsável: **{st.session_state['aluno_nome']}** | Matrícula: **{st.session_state['aluno_matricula']}** | Órgão: **{st.session_state['aluno_orgao']}**")
         if st.sidebar.button("🚪 Sair / Mudar de Conta"):
-            cookie_manager.delete(key="uff_pcd_matricula")
+            cookie_manager.delete(cookie="uff_pcd_matricula")
             del st.session_state['aluno_logado']
             st.rerun()
             
