@@ -22,11 +22,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- GERENCIADOR DE COOKIES / LOCAL STORAGE ---
-@st.cache_resource
-def obter_gerenciador_cookies():
-    return stx.CookieManager()
-
-cookie_manager = obter_gerenciador_cookies()
+# Inicialização direta para evitar o conflito do CachedWidgetWarning
+cookie_manager = stx.CookieManager()
 
 # --- BANCO DE DADOS PERSISTENTE LOCAL ---
 DB_PATH = "pcd_data_permanente.db"
@@ -39,7 +36,7 @@ def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS estrutura (id INTEGER PRIMARY KEY AUTOINCREMENT, matricula TEXT, tipo TEXT NOT NULL, codigo TEXT NOT NULL, texto TEXT NOT NULL, UNIQUE(matricula, codigo), FOREIGN KEY (matricula) REFERENCES alunos(matricula))''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS admin_config (usuario TEXT PRIMARY KEY, senha TEXT NOT NULL)''')
     
-    # NOVAS CREDENCIAIS SOLICITADAS: admin0 / 0admin
+    # Credenciais atualizadas: admin0 / 0admin
     cursor.execute("INSERT OR IGNORE INTO admin_config VALUES ('admin0', '0admin')")
     conn.commit()
     return conn
@@ -528,7 +525,6 @@ elif menu == "Área do Professor (Admin)":
             você pode reinjetar instantaneamente uma base completa para testes ou recuperação dos alunos de forma imediata.
             """)
             
-            # Form de entrada para carregar dados recuperados
             with st.form("form_recuperacao_manual"):
                 mat_recup = st.text_input("Matrícula do Líder do Aluno a recuperar:")
                 nome_recup = st.text_input("Nome Completo do Líder:")
@@ -541,10 +537,8 @@ elif menu == "Área do Professor (Admin)":
                     if not mat_recup or not nome_recup or not orgao_recup:
                         st.error("Preencha todos os campos do aluno para restaurar.")
                     else:
-                        # Injeta o perfil do Aluno
                         cursor.execute("INSERT OR IGNORE INTO alunos VALUES (?, ?, ?)", (mat_recup.strip(), nome_recup.strip(), orgao_recup.strip()))
                         
-                        # Injeta uma Planilha-Mãe Padrão de Estrutura Arquivística como Backup de Emergência
                         dados_backup_padrao = [
                             ("Função", "01.", "GESTÃO ACADÊMICA"),
                             ("Subfunção", "01.01.", "Matrícula e Ingresso de Alunos"),
