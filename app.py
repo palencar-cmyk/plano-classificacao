@@ -578,5 +578,3 @@ elif menu == "Área do Professor (Admin)":
                                 
                         conn.commit()
                         st.success(f"🎉 Pronto! O perfil de {nome_recup} foi reativado e {sucesso_itens} itens estruturais foram reinseridos na base local com sucesso!")
-
-```
